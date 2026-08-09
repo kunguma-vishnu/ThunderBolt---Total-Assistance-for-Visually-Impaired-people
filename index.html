@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#000000">
+<title>PathGuide</title>
+<style>
+  /* ============ PathGuide — navigation assistant for blind users ============ */
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; background: #000; color: #fff; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; overflow: hidden; }
+
+  .screen { position: fixed; inset: 0; display: none; flex-direction: column; }
+  .screen.active { display: flex; }
+
+  /* ---------- Setup screen (sighted helper) ---------- */
+  #setupScreen { overflow-y: auto; display: none; padding: 16px; background: #111; }
+  #setupScreen.active { display: block; }
+  #setupScreen h1 { font-size: 28px; color: #ffd400; margin-bottom: 4px; }
+  #setupScreen .sub { color: #999; font-size: 13px; margin-bottom: 18px; }
+  .card { background: #1c1c1e; border: 1px solid #333; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+  .card h2 { font-size: 15px; color: #ffd400; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  label { display: block; font-size: 13px; color: #bbb; margin: 10px 0 4px; }
+  input[type="text"], input[type="password"], textarea, select {
+    width: 100%; background: #000; color: #fff; border: 1px solid #444; border-radius: 8px;
+    padding: 10px; font-size: 15px;
+  }
+  textarea { min-height: 90px; font-family: monospace; font-size: 12px; }
+  input[type="file"] { width: 100%; color: #ccc; font-size: 13px; padding: 6px 0; }
+  .btn {
+    display: block; width: 100%; padding: 12px; margin-top: 10px; border: none; border-radius: 10px;
+    background: #333; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  .btn:active { background: #444; }
+  .btn.primary { background: #ffd400; color: #000; font-size: 20px; padding: 18px; }
+  .btn.primary:disabled { background: #555; color: #999; }
+  .btn.small { padding: 9px; font-size: 13px; margin-top: 8px; }
+  .toggleRow { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+  .toggleRow span { font-size: 14px; color: #ddd; padding-right: 10px; }
+  .switch { position: relative; width: 52px; height: 30px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider { position: absolute; inset: 0; background: #444; border-radius: 30px; transition: 0.2s; }
+  .slider::before { content: ""; position: absolute; height: 24px; width: 24px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: 0.2s; }
+  .switch input:checked + .slider { background: #ffd400; }
+  .switch input:checked + .slider::before { transform: translateX(22px); }
+  .hint { font-size: 12px; color: #777; margin-top: 6px; line-height: 1.4; }
+  #mapStatus { font-size: 13px; margin-top: 8px; color: #4cd964; display: none; }
+  #mapPickerWrap { display: none; margin-top: 8px; }
+  #practiceOptions { display: none; margin-top: 6px; }
+
+  /* ---------- Navigation screen (blind user) ---------- */
+  #navScreen { background: #000; }
+  #tapButton {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    background: #000; border: none; color: #fff; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 24px; text-align: center;
+  }
+  #tapButton:disabled { cursor: wait; }
+  #tapButton.thinking { background: #1a1400; }
+  #navStatus { font-size: 26px; font-weight: 800; color: #ffd400; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 18px; }
+  #hazardText { font-size: 22px; font-weight: 800; color: #ff453a; margin-bottom: 12px; display: none; }
+  #instructionText { font-size: 34px; font-weight: 800; line-height: 1.25; color: #fff; word-wrap: break-word; max-width: 100%; }
+  #progressText { position: absolute; top: 12px; left: 0; right: 0; text-align: center; font-size: 14px; color: #888; pointer-events: none; }
+  #modeBadge { position: absolute; top: 34px; left: 0; right: 0; text-align: center; font-size: 12px; color: #ff9f0a; pointer-events: none; display: none; }
+  #debugLink {
+    position: absolute; bottom: 8px; right: 12px; font-size: 11px; color: #333;
+    background: none; border: none; padding: 8px; z-index: 5; cursor: pointer;
+  }
+  #debugPanel {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.96); z-index: 50; display: none;
+    flex-direction: column; padding: 14px; color: #ccc;
+  }
+  #debugPanel.open { display: flex; }
+  #debugPanel h3 { color: #ffd400; font-size: 15px; margin-bottom: 8px; }
+  #debugLog { flex: 1; overflow-y: auto; background: #111; border: 1px solid #333; border-radius: 8px; padding: 10px; font-family: monospace; font-size: 11px; white-space: pre-wrap; word-break: break-word; }
+  #debugPanel .btn { margin-top: 8px; }
+
+  /* hidden capture plumbing */
+  #camVideo { position: absolute; width: 2px; height: 2px; opacity: 0.01; pointer-events: none; left: -10px; top: -10px; }
+  #fallbackInput { display: none; }
+
+  /* toast */
+  #toast {
+    position: fixed; top: 60px; left: 12px; right: 12px; z-index: 100;
+    background: #b3261e; color: #fff; padding: 12px 14px; border-radius: 10px;
+    font-size: 14px; font-weight: 600; display: none; text-align: center;
+  }
+  #toast.info { background: #2c2c2e; }
+
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .thinking #navStatus { animation: pulse 0.9s infinite; }
+</style>
+</head>
+<body>
+
+<!-- ======================= SETUP SCREEN ======================= -->
+<div id="setupScreen" class="screen active">
+  <h1>PathGuide</h1>
+  <div class="sub">Setup — done by a sighted helper before handing over the phone.</div>
+
+  <div class="card">
+    <h2>1. Load map</h2>
+    <label>Upload map JSON file</label>
+    <input type="file" id="mapFile" accept=".json,application/json">
+    <label>Or paste map JSON</label>
+    <textarea id="mapPaste" placeholder='{"map_version":1,"location_name":"...","waypoints":[...]}'></textarea>
+    <button class="btn small" id="loadPasteBtn">Load pasted JSON</button>
+    <button class="btn small" id="loadLocalBtn">Load from PathMapper (localStorage "pathmapper_maps")</button>
+    <div id="mapPickerWrap">
+      <label>Multiple maps found — pick one</label>
+      <select id="mapPicker"></select>
+      <button class="btn small" id="mapPickerLoadBtn">Use selected map</button>
+    </div>
+    <div id="mapStatus"></div>
+  </div>
+
+  <div class="card">
+    <h2>2. Claude API key</h2>
+    <input type="password" id="apiKey" placeholder="sk-ant-..." autocomplete="off">
+    <div class="hint">Stored in this phone's localStorage only. Not needed in Practice mode.</div>
+  </div>
+
+  <div class="card">
+    <h2>3. Destination</h2>
+    <select id="destSelect" disabled><option>Load a map first</option></select>
+  </div>
+
+  <div class="card">
+    <h2>4. Demo options</h2>
+    <div class="toggleRow">
+      <span>Practice mode (no API — replay canned responses)</span>
+      <label class="switch"><input type="checkbox" id="practiceToggle"><span class="slider"></span></label>
+    </div>
+    <div id="practiceOptions">
+      <label>Practice source</label>
+      <select id="practiceSource">
+        <option value="builtin">Built-in demo sequence</option>
+        <option value="cache">Recorded cache from a live run</option>
+      </select>
+      <div class="hint" id="cacheInfo"></div>
+    </div>
+    <div class="toggleRow">
+      <span>Record live responses to practice cache</span>
+      <label class="switch"><input type="checkbox" id="recordToggle"><span class="slider"></span></label>
+    </div>
+    <button class="btn small" id="clearCacheBtn">Clear practice cache</button>
+  </div>
+
+  <button class="btn primary" id="startBtn" disabled>Start Navigation</button>
+  <div class="hint" style="margin:10px 0 30px; text-align:center;">After starting, the whole screen is one big button: tap → photo → spoken instruction.</div>
+</div>
+
+<!-- ======================= NAVIGATION SCREEN ======================= -->
+<div id="navScreen" class="screen">
+  <button id="tapButton">
+    <div id="navStatus">Tap anywhere for directions</div>
+    <div id="hazardText"></div>
+    <div id="instructionText">Navigation started. Tap the screen to begin.</div>
+  </button>
+  <div id="progressText"></div>
+  <div id="modeBadge"></div>
+  <button id="debugLink">debug</button>
+  <video id="camVideo" autoplay playsinline muted></video>
+  <input type="file" id="fallbackInput" accept="image/*" capture="environment">
+</div>
+
+<!-- ======================= DEBUG PANEL ======================= -->
+<div id="debugPanel">
+  <h3>PathGuide session log (team only)</h3>
+  <div id="debugLog"></div>
+  <button class="btn small" id="debugCloseBtn">Close</button>
+  <button class="btn small" id="debugExitBtn">End session → back to setup</button>
+</div>
+
+<div id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* =============================== STATE =============================== */
+  var LS_KEY_API = "pathguide_api_key";
+  var LS_KEY_CACHE = "pathguide_practice_cache";
+  var LS_KEY_PATHMAPPER = "pathmapper_maps";
+
+  var state = {
+    map: null,               // validated map object, waypoints sorted by order
+    destIndex: 0,            // index (into waypoints array) of destination
+    currentIndex: 0,         // progress: index of waypoint we believe user is at
+    prevInstruction: "None yet — this is the first request.",
+    busy: false,
+    arrivedDone: false,
+    practiceMode: false,
+    practiceSource: "builtin",
+    practiceResponses: [],
+    practiceIdx: 0,
+    recordToCache: false,
+    sessionLog: [],
+    cameraStream: null,
+    cameraOk: false,
+    wakeLock: null
+  };
+
+  /* Built-in canned responses for Practice mode (demo insurance). */
+  var BUILTIN_PRACTICE = [
+    { localization: "At the starting point, hallway ahead.", instruction: "Turn slightly left, take four small steps forward.", hazard: null, arrived: false, advance_waypoint: false, confidence: "high" },
+    { localization: "Moving along hallway toward first landmark.", instruction: "Walk straight, take five small steps.", hazard: null, arrived: false, advance_waypoint: true, confidence: "high" },
+    { localization: "Near doorway, chair on the right side.", instruction: "A chair is on your right, step slightly left, then two steps forward.", hazard: "Chair on the right side of the path", arrived: false, advance_waypoint: false, confidence: "high" },
+    { localization: "Passing through the doorway.", instruction: "Walk straight through the doorway, three small steps.", hazard: null, arrived: false, advance_waypoint: true, confidence: "high" },
+    { localization: "Image is blurry, cannot confirm location.", instruction: "Please stop, hold still, and tap again to retake the photo.", hazard: null, arrived: false, advance_waypoint: false, confidence: "low" },
+    { localization: "Destination area visible directly ahead.", instruction: "Take two small steps forward and stop.", hazard: null, arrived: true, advance_waypoint: true, confidence: "high" }
+  ];
+
+  /* =============================== DOM =============================== */
+  function $(id) { return document.getElementById(id); }
+  var setupScreen = $("setupScreen"), navScreen = $("navScreen");
+  var mapFile = $("mapFile"), mapPaste = $("mapPaste"), loadPasteBtn = $("loadPasteBtn"),
+      loadLocalBtn = $("loadLocalBtn"), mapPickerWrap = $("mapPickerWrap"), mapPicker = $("mapPicker"),
+      mapPickerLoadBtn = $("mapPickerLoadBtn"), mapStatus = $("mapStatus"),
+      apiKeyInput = $("apiKey"), destSelect = $("destSelect"),
+      practiceToggle = $("practiceToggle"), practiceOptions = $("practiceOptions"),
+      practiceSource = $("practiceSource"), cacheInfo = $("cacheInfo"),
+      recordToggle = $("recordToggle"), clearCacheBtn = $("clearCacheBtn"), startBtn = $("startBtn"),
+      tapButton = $("tapButton"), navStatus = $("navStatus"), hazardText = $("hazardText"),
+      instructionText = $("instructionText"), progressText = $("progressText"), modeBadge = $("modeBadge"),
+      debugLink = $("debugLink"), debugPanel = $("debugPanel"), debugLog = $("debugLog"),
+      debugCloseBtn = $("debugCloseBtn"), debugExitBtn = $("debugExitBtn"),
+      camVideo = $("camVideo"), fallbackInput = $("fallbackInput"), toast = $("toast");
+
+  /* =============================== TOASTS =============================== */
+  var toastTimer = null;
+  function showToast(msg, isInfo) {
+    try {
+      toast.textContent = msg;
+      toast.className = isInfo ? "info" : "";
+      toast.style.display = "block";
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(function () { toast.style.display = "none"; }, 4500);
+    } catch (e) { /* never crash on UI */ }
+  }
+
+  /* =============================== AUDIO =============================== */
+  var audioCtx = null;
+  function ensureAudio() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === "suspended") audioCtx.resume();
+    } catch (e) { audioCtx = null; }
+    return audioCtx;
+  }
+  function beep(freq, startDelay, duration, gainVal, type) {
+    var ctx = ensureAudio();
+    if (!ctx) return;
+    try {
+      var osc = ctx.createOscillator();
+      var g = ctx.createGain();
+      osc.type = type || "sine";
+      osc.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, ctx.currentTime + startDelay);
+      g.gain.exponentialRampToValueAtTime(gainVal, ctx.currentTime + startDelay + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + startDelay + duration);
+      osc.connect(g); g.connect(ctx.destination);
+      osc.start(ctx.currentTime + startDelay);
+      osc.stop(ctx.currentTime + startDelay + duration + 0.05);
+    } catch (e) { /* ignore audio errors */ }
+  }
+  var tickTimer = null;
+  function startTicking() {
+    stopTicking();
+    beep(880, 0, 0.06, 0.08);
+    tickTimer = setInterval(function () { beep(880, 0, 0.06, 0.08); }, 550);
+  }
+  function stopTicking() {
+    if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+  }
+  function playSuccessTone() {
+    /* distinct rising arpeggio */
+    beep(523.25, 0.00, 0.18, 0.25);
+    beep(659.25, 0.18, 0.18, 0.25);
+    beep(783.99, 0.36, 0.18, 0.25);
+    beep(1046.5, 0.54, 0.45, 0.3);
+  }
+
+  /* =============================== SPEECH =============================== */
+  function speak(text) {
+    try {
+      if (!("speechSynthesis" in window)) return;
+      window.speechSynthesis.cancel();
+      var u = new SpeechSynthesisUtterance(text);
+      u.rate = 0.95;
+      u.lang = "en-US";
+      window.speechSynthesis.speak(u);
+    } catch (e) { /* ignore speech errors */ }
+  }
+
+  /* =============================== LOGGING =============================== */
+  function logExchange(entry) {
+    try {
+      entry.time = new Date().toISOString();
+      state.sessionLog.push(entry);
+    } catch (e) { /* ignore */ }
+  }
+  function renderDebug() {
+    try {
+      debugLog.textContent = state.sessionLog.length
+        ? JSON.stringify(state.sessionLog, null, 2)
+        : "(no exchanges yet)";
+    } catch (e) { debugLog.textContent = "(log render error)"; }
+  }
+
+  /* =============================== MAP LOADING =============================== */
+  function validateMap(obj) {
+    if (!obj || typeof obj !== "object") throw new Error("Map is not an object.");
+    if (!Array.isArray(obj.waypoints) || obj.waypoints.length === 0) throw new Error("Map has no waypoints.");
+    var wps = obj.waypoints.slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+    for (var i = 0; i < wps.length; i++) {
+      if (!wps[i].label) wps[i].label = "Waypoint " + (i + 1);
+      if (typeof wps[i].notes !== "string") wps[i].notes = "";
+      if (typeof wps[i].transition_from_previous !== "string") wps[i].transition_from_previous = "";
+    }
+    return {
+      map_version: obj.map_version || 1,
+      location_name: obj.location_name || "Unknown location",
+      waypoints: wps
+    };
+  }
+  function setMap(obj) {
+    state.map = validateMap(obj);
+    mapStatus.style.display = "block";
+    mapStatus.textContent = "✓ Loaded \"" + state.map.location_name + "\" — " + state.map.waypoints.length + " waypoints.";
+    destSelect.innerHTML = "";
+    destSelect.disabled = false;
+    state.map.waypoints.forEach(function (wp, i) {
+      var opt = document.createElement("option");
+      opt.value = String(i);
+      opt.textContent = (i + 1) + ". " + wp.label;
+      destSelect.appendChild(opt);
+    });
+    destSelect.value = String(state.map.waypoints.length - 1); /* default: last waypoint */
+    refreshStartEnabled();
+  }
+  function tryLoadJsonText(text) {
+    var obj = JSON.parse(text);
+    setMap(obj);
+  }
+
+  mapFile.addEventListener("change", function () {
+    var f = mapFile.files && mapFile.files[0];
+    if (!f) return;
+    var r = new FileReader();
+    r.onload = function () {
+      try { tryLoadJsonText(String(r.result)); }
+      catch (e) { showToast("Could not parse map file: " + e.message); }
+    };
+    r.onerror = function () { showToast("Could not read the file."); };
+    r.readAsText(f);
+  });
+
+  loadPasteBtn.addEventListener("click", function () {
+    try {
+      if (!mapPaste.value.trim()) { showToast("Paste the map JSON first."); return; }
+      tryLoadJsonText(mapPaste.value.trim());
+    } catch (e) { showToast("Could not parse pasted JSON: " + e.message); }
+  });
+
+  /* pathmapper_maps may hold: a single map object, an array of maps,
+     or an object of { name: map }. Handle all three defensively. */
+  var pendingMaps = [];
+  loadLocalBtn.addEventListener("click", function () {
+    try {
+      var raw = localStorage.getItem(LS_KEY_PATHMAPPER);
+      if (!raw) { showToast('No data found at localStorage key "pathmapper_maps".'); return; }
+      var data = JSON.parse(raw);
+      var candidates = [];
+      if (Array.isArray(data)) {
+        candidates = data;
+      } else if (data && Array.isArray(data.waypoints)) {
+        candidates = [data];
+      } else if (data && typeof data === "object") {
+        Object.keys(data).forEach(function (k) {
+          var v = data[k];
+          if (v && Array.isArray(v.waypoints)) candidates.push(v);
+        });
+      }
+      candidates = candidates.filter(function (m) { return m && Array.isArray(m.waypoints) && m.waypoints.length; });
+      if (!candidates.length) { showToast("pathmapper_maps exists but contained no valid maps."); return; }
+      if (candidates.length === 1) { setMap(candidates[0]); return; }
+      pendingMaps = candidates;
+      mapPicker.innerHTML = "";
+      candidates.forEach(function (m, i) {
+        var opt = document.createElement("option");
+        opt.value = String(i);
+        opt.textContent = (m.location_name || "Map " + (i + 1)) + " (" + m.waypoints.length + " waypoints)";
+        mapPicker.appendChild(opt);
+      });
+      mapPickerWrap.style.display = "block";
+      showToast(candidates.length + " maps found — pick one below.", true);
+    } catch (e) { showToast("Failed to load from localStorage: " + e.message); }
+  });
+  mapPickerLoadBtn.addEventListener("click", function () {
+    try {
+      var m = pendingMaps[parseInt(mapPicker.value, 10)];
+      if (!m) { showToast("Pick a map first."); return; }
+      setMap(m);
+    } catch (e) { showToast("Could not load selected map: " + e.message); }
+  });
+
+  /* =============================== SETUP: KEY / TOGGLES =============================== */
+  try { apiKeyInput.value = localStorage.getItem(LS_KEY_API) || ""; } catch (e) { /* ignore */ }
+  apiKeyInput.addEventListener("input", function () {
+    try { localStorage.setItem(LS_KEY_API, apiKeyInput.value.trim()); } catch (e) { /* ignore */ }
+    refreshStartEnabled();
+  });
+
+  function getCachedRun() {
+    try {
+      var raw = localStorage.getItem(LS_KEY_CACHE);
+      if (!raw) return [];
+      var arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) { return []; }
+  }
+  function refreshCacheInfo() {
+    var n = getCachedRun().length;
+    cacheInfo.textContent = n
+      ? "Cache holds " + n + " recorded response" + (n === 1 ? "" : "s") + " from a live run."
+      : "Cache is empty — run live once with recording ON to fill it.";
+  }
+  refreshCacheInfo();
+
+  practiceToggle.addEventListener("change", function () {
+    practiceOptions.style.display = practiceToggle.checked ? "block" : "none";
+    refreshCacheInfo();
+    refreshStartEnabled();
+  });
+  clearCacheBtn.addEventListener("click", function () {
+    try { localStorage.removeItem(LS_KEY_CACHE); } catch (e) { /* ignore */ }
+    refreshCacheInfo();
+    showToast("Practice cache cleared.", true);
+  });
+
+  function refreshStartEnabled() {
+    var haveMap = !!state.map;
+    var haveKey = !!apiKeyInput.value.trim();
+    startBtn.disabled = !(haveMap && (haveKey || practiceToggle.checked));
+  }
+
+  /* =============================== CAMERA =============================== */
+  function startCamera() {
+    state.cameraOk = false;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showToast("Camera API unavailable — using photo picker fallback.", true);
+      return Promise.resolve();
+    }
+    return navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    }).then(function (stream) {
+      state.cameraStream = stream;
+      camVideo.srcObject = stream;
+      return camVideo.play().catch(function () { /* some browsers reject silently */ });
+    }).then(function () {
+      state.cameraOk = true;
+    }).catch(function (e) {
+      state.cameraOk = false;
+      showToast("Camera blocked (" + (e && e.name ? e.name : "error") + ") — using photo picker fallback.", true);
+    });
+  }
+  function stopCamera() {
+    try {
+      if (state.cameraStream) state.cameraStream.getTracks().forEach(function (t) { t.stop(); });
+    } catch (e) { /* ignore */ }
+    state.cameraStream = null;
+    state.cameraOk = false;
+  }
+
+  /* Downscale an image source (video frame or Image) to max 1024px, JPEG 0.7.
+     Returns a full data URL. */
+  function frameToDataUrl(source, w, h) {
+    var MAX = 1024;
+    var scale = Math.min(1, MAX / Math.max(w, h));
+    var cw = Math.max(1, Math.round(w * scale));
+    var ch = Math.max(1, Math.round(h * scale));
+    var canvas = document.createElement("canvas");
+    canvas.width = cw; canvas.height = ch;
+    canvas.getContext("2d").drawImage(source, 0, 0, cw, ch);
+    return canvas.toDataURL("image/jpeg", 0.7);
+  }
+
+  /* Capture one photo. Resolves with a data URL, or rejects. */
+  var fallbackResolve = null, fallbackReject = null;
+  function capturePhoto() {
+    if (state.cameraOk && camVideo.videoWidth > 0) {
+      return new Promise(function (resolve, reject) {
+        try {
+          resolve(frameToDataUrl(camVideo, camVideo.videoWidth, camVideo.videoHeight));
+        } catch (e) { reject(e); }
+      });
+    }
+    /* Fallback: native photo picker (capture="environment") */
+    return new Promise(function (resolve, reject) {
+      fallbackResolve = resolve; fallbackReject = reject;
+      fallbackInput.value = "";
+      fallbackInput.click();
+      /* if the user cancels the picker there is no event; time out gracefully */
+      setTimeout(function () {
+        if (fallbackReject === reject) { fallbackResolve = null; fallbackReject = null; reject(new Error("No photo taken.")); }
+      }, 45000);
+    });
+  }
+  fallbackInput.addEventListener("change", function () {
+    var f = fallbackInput.files && fallbackInput.files[0];
+    var res = fallbackResolve, rej = fallbackReject;
+    fallbackResolve = null; fallbackReject = null;
+    if (!res) return;
+    if (!f) { if (rej) rej(new Error("No photo selected.")); return; }
+    var img = new Image();
+    var url = URL.createObjectURL(f);
+    img.onload = function () {
+      try { res(frameToDataUrl(img, img.naturalWidth, img.naturalHeight)); }
+      catch (e) { if (rej) rej(e); }
+      finally { URL.revokeObjectURL(url); }
+    };
+    img.onerror = function () { URL.revokeObjectURL(url); if (rej) rej(new Error("Could not read photo.")); };
+    img.src = url;
+  });
+
+  /* =============================== CLAUDE API =============================== */
+  var SYSTEM_PROMPT = [
+    "You are guiding a blind person walking indoors, using photos from a phone camera mounted on their cap facing forward.",
+    "",
+    "OUTPUT FORMAT (mandatory): Respond ONLY with valid JSON, no markdown fences, no prose, exactly this shape:",
+    '{"localization":"string","instruction":"string","hazard":"string or null","arrived":boolean,"advance_waypoint":boolean,"confidence":"high|medium|low"}',
+    "",
+    "RULES:",
+    "- One physical action per instruction, phrased in steps and body turns (e.g. \"turn slightly right, take 3 small steps\"). Never use meters or distances in units. Never use compass directions.",
+    "- If a hazard is visible in the live photo (obstacle, cable, wet floor, step, person, open door edge), the instruction MUST address the hazard first, before any progress instruction. Also describe it in the \"hazard\" field; otherwise set \"hazard\" to null.",
+    "- If the live photo does not plausibly match the expected waypoint area, or is too dark or too blurry to judge, set \"confidence\" to \"low\" and make the instruction a request to stop, hold still, and recapture. NEVER guess a direction at low confidence.",
+    "- Set \"advance_waypoint\" to true only when the live photo shows the user has reached the NEXT waypoint.",
+    "- Set \"arrived\" to true only when the live photo shows the user is at the final destination waypoint.",
+    "- Keep \"instruction\" under 20 words.",
+    "- \"localization\" is a one-sentence description of where the user appears to be."
+  ].join("\n");
+
+  function splitDataUrl(dataUrl) {
+    /* returns { mediaType, data } from a data: URL; defaults to jpeg */
+    var m = /^data:([^;,]+);base64,(.*)$/.exec(dataUrl || "");
+    if (m) return { mediaType: m[1], data: m[2] };
+    return null;
+  }
+
+  function buildRouteText() {
+    var lines = [];
+    lines.push("LOCATION: " + state.map.location_name);
+    lines.push("");
+    lines.push("FULL ORDERED WAYPOINT LIST:");
+    state.map.waypoints.forEach(function (wp, i) {
+      lines.push((i + 1) + ". " + wp.label +
+        (wp.notes ? " | notes: " + wp.notes : "") +
+        (wp.transition_from_previous ? " | how to get here from previous: " + wp.transition_from_previous : ""));
+    });
+    lines.push("");
+    lines.push("CURRENT PROGRESS: the user is believed to be at waypoint " + (state.currentIndex + 1) +
+      " (\"" + state.map.waypoints[state.currentIndex].label + "\") of " + state.map.waypoints.length + ".");
+    var nextIdx = Math.min(state.currentIndex + 1, state.destIndex);
+    lines.push("NEXT WAYPOINT TO REACH: waypoint " + (nextIdx + 1) + " (\"" + state.map.waypoints[nextIdx].label + "\").");
+    lines.push("DESTINATION: waypoint " + (state.destIndex + 1) + " (\"" + state.map.waypoints[state.destIndex].label + "\").");
+    lines.push("PREVIOUS INSTRUCTION GIVEN TO THE USER: " + state.prevInstruction);
+    return lines.join("\n");
+  }
+
+  function buildContentBlocks(liveDataUrl) {
+    var blocks = [];
+    var live = splitDataUrl(liveDataUrl);
+    blocks.push({ type: "text", text: "LIVE PHOTO — just captured from the user's cap-mounted camera:" });
+    blocks.push({ type: "image", source: { type: "base64", media_type: live.mediaType, data: live.data } });
+
+    var curWp = state.map.waypoints[state.currentIndex];
+    var nextIdx = Math.min(state.currentIndex + 1, state.destIndex);
+    var nextWp = state.map.waypoints[nextIdx];
+
+    var curRef = splitDataUrl(curWp.photo_base64);
+    if (curRef) {
+      blocks.push({ type: "text", text: "REFERENCE PHOTO — the CURRENT expected waypoint area (\"" + curWp.label + "\"):" });
+      blocks.push({ type: "image", source: { type: "base64", media_type: curRef.mediaType, data: curRef.data } });
+    } else {
+      blocks.push({ type: "text", text: "(No reference photo available for the current expected waypoint \"" + curWp.label + "\".)" });
+    }
+
+    if (nextIdx !== state.currentIndex) {
+      var nextRef = splitDataUrl(nextWp.photo_base64);
+      if (nextRef) {
+        blocks.push({ type: "text", text: "REFERENCE PHOTO — the NEXT waypoint the user should reach (\"" + nextWp.label + "\"):" });
+        blocks.push({ type: "image", source: { type: "base64", media_type: nextRef.mediaType, data: nextRef.data } });
+      } else {
+        blocks.push({ type: "text", text: "(No reference photo available for the next waypoint \"" + nextWp.label + "\".)" });
+      }
+    }
+
+    blocks.push({ type: "text", text: buildRouteText() });
+    return blocks;
+  }
+
+  function callClaude(liveDataUrl) {
+    var key = "";
+    try { key = localStorage.getItem(LS_KEY_API) || ""; } catch (e) { /* ignore */ }
+    if (!key) return Promise.reject(new Error("No API key saved."));
+
+    var body = {
+      model: "claude-sonnet-4-6",
+      max_tokens: 500,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: "user", content: buildContentBlocks(liveDataUrl) }]
+    };
+
+    var controller = ("AbortController" in window) ? new AbortController() : null;
+    var timeoutId = controller ? setTimeout(function () { controller.abort(); }, 60000) : null;
+
+    return fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify(body),
+      signal: controller ? controller.signal : undefined
+    }).then(function (res) {
+      if (timeoutId) clearTimeout(timeoutId);
+      return res.text().then(function (txt) {
+        if (!res.ok) {
+          var msg = "API error " + res.status;
+          try { var j = JSON.parse(txt); if (j.error && j.error.message) msg += ": " + j.error.message; } catch (e) { /* ignore */ }
+          throw new Error(msg);
+        }
+        var data = JSON.parse(txt);
+        var raw = "";
+        if (data.content && data.content.length) {
+          data.content.forEach(function (b) { if (b.type === "text") raw += b.text; });
+        }
+        return raw;
+      });
+    }).catch(function (e) {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (e && e.name === "AbortError") throw new Error("Request timed out.");
+      throw e;
+    });
+  }
+
+  /* Defensive JSON extraction: strip anything before first "{" / after last "}". */
+  function parseResponseJson(raw) {
+    if (typeof raw !== "string") return null;
+    var a = raw.indexOf("{"), b = raw.lastIndexOf("}");
+    if (a === -1 || b === -1 || b <= a) return null;
+    try {
+      var obj = JSON.parse(raw.slice(a, b + 1));
+      if (!obj || typeof obj !== "object") return null;
+      if (typeof obj.instruction !== "string") return null;
+      return obj;
+    } catch (e) { return null; }
+  }
+
+  /* =============================== NAV FLOW =============================== */
+  function updateProgressText() {
+    if (!state.map) return;
+    progressText.textContent =
+      "Waypoint " + (state.currentIndex + 1) + " / " + (state.destIndex + 1) +
+      " — heading to: " + state.map.waypoints[state.destIndex].label;
+  }
+
+  function setBusy(busy, statusMsg) {
+    state.busy = busy;
+    tapButton.disabled = busy;
+    tapButton.classList.toggle("thinking", busy);
+    navStatus.textContent = statusMsg || (busy ? "Thinking…" : "Tap anywhere for directions");
+  }
+
+  function getPracticeResponse() {
+    var arr = state.practiceResponses;
+    if (!arr.length) return null;
+    var idx = Math.min(state.practiceIdx, arr.length - 1); /* clamp: repeat last if exhausted */
+    state.practiceIdx++;
+    return arr[idx];
+  }
+
+  function handleParsedResponse(resp, sourceLabel) {
+    /* Record to practice cache (live runs only) */
+    if (state.recordToCache && sourceLabel === "live") {
+      try {
+        var cache = getCachedRun();
+        cache.push(resp);
+        localStorage.setItem(LS_KEY_CACHE, JSON.stringify(cache));
+      } catch (e) { /* storage full etc — non-fatal */ }
+    }
+
+    logExchange({
+      source: sourceLabel,
+      waypoint_index_before: state.currentIndex,
+      response: resp
+    });
+
+    var conf = (resp.confidence === "low" || resp.confidence === "medium" || resp.confidence === "high") ? resp.confidence : "low";
+
+    /* App-side state guards */
+    if (resp.advance_waypoint === true && conf !== "low") {
+      state.currentIndex = Math.min(state.currentIndex + 1, state.destIndex);
+    }
+    var atFinal = state.currentIndex >= state.destIndex;
+    var arrivedNow = (resp.arrived === true) && atFinal && conf !== "low"; /* arrived only valid at final waypoint */
+
+    /* UI */
+    hazardText.style.display = resp.hazard ? "block" : "none";
+    hazardText.textContent = resp.hazard ? "⚠ " + resp.hazard : "";
+    instructionText.textContent = resp.instruction;
+    updateProgressText();
+
+    if (arrivedNow) {
+      state.arrivedDone = true;
+      var destWp = state.map.waypoints[state.destIndex];
+      var arrivalMsg = "You have arrived." + (destWp.notes ? " " + destWp.notes : "");
+      navStatus.textContent = "Arrived!";
+      instructionText.textContent = arrivalMsg;
+      playSuccessTone();
+      try { if (navigator.vibrate) navigator.vibrate([250, 120, 250, 120, 500]); } catch (e) { /* ignore */ }
+      /* small delay so the tone leads, then speak */
+      setTimeout(function () { speak(arrivalMsg); }, 700);
+    } else {
+      speak(resp.instruction);
+    }
+  }
+
+  function onTap() {
+    if (state.busy || !state.map) return;
+    ensureAudio(); /* unlock audio inside the user gesture */
+    try { if (navigator.vibrate) navigator.vibrate(40); } catch (e) { /* ignore */ }
+
+    if (state.arrivedDone) {
+      /* already there — just repeat the arrival info on further taps */
+      var destWp = state.map.waypoints[state.destIndex];
+      speak("You have arrived." + (destWp.notes ? " " + destWp.notes : ""));
+      return;
+    }
+
+    setBusy(true, state.practiceMode ? "Practice — thinking…" : "Taking photo…");
+
+    /* -------- Practice mode: no camera, no API -------- */
+    if (state.practiceMode) {
+      startTicking();
+      setTimeout(function () { /* small fake latency so the demo feels real */
+        try {
+          var resp = getPracticeResponse();
+          if (!resp) {
+            speak("Please tap again.");
+            instructionText.textContent = "Practice cache is empty. Please tap again.";
+            showToast("No practice responses available.");
+          } else {
+            handleParsedResponse(resp, "practice");
+          }
+        } catch (e) {
+          showToast("Practice error: " + e.message);
+          speak("Please tap again.");
+        } finally {
+          stopTicking();
+          if (!state.arrivedDone) setBusy(false);
+          else { state.busy = false; tapButton.disabled = false; tapButton.classList.remove("thinking"); }
+        }
+      }, 900);
+      return;
+    }
+
+    /* -------- Live mode: capture → API → speak -------- */
+    capturePhoto().then(function (dataUrl) {
+      setBusy(true, "Thinking…");
+      startTicking();
+      return callClaude(dataUrl);
+    }).then(function (raw) {
+      var resp = parseResponseJson(raw);
+      if (!resp) {
+        logExchange({ source: "live", parse_error: true, raw: String(raw).slice(0, 2000) });
+        instructionText.textContent = "Please tap again.";
+        speak("Please tap again.");
+        return; /* do not advance state on parse failure */
+      }
+      handleParsedResponse(resp, "live");
+    }).catch(function (e) {
+      var msg = (e && e.message) ? e.message : "Unknown error";
+      logExchange({ source: "live", error: msg });
+      showToast(msg);
+      instructionText.textContent = "Something went wrong. Please tap again.";
+      speak("Please tap again.");
+    }).then(function () {
+      /* always return to a tappable state, no matter what happened */
+      stopTicking();
+      if (!state.arrivedDone) setBusy(false);
+      else { state.busy = false; tapButton.disabled = false; tapButton.classList.remove("thinking"); }
+    });
+  }
+  tapButton.addEventListener("click", onTap);
+
+  /* =============================== START / EXIT =============================== */
+  startBtn.addEventListener("click", function () {
+    try {
+      if (!state.map) { showToast("Load a map first."); return; }
+      state.destIndex = parseInt(destSelect.value, 10);
+      if (isNaN(state.destIndex) || state.destIndex < 0 || state.destIndex >= state.map.waypoints.length) {
+        state.destIndex = state.map.waypoints.length - 1;
+      }
+      state.currentIndex = 0;
+      state.prevInstruction = "None yet — this is the first request.";
+      state.arrivedDone = false;
+      state.sessionLog = [];
+      state.practiceMode = practiceToggle.checked;
+      state.recordToCache = recordToggle.checked;
+      state.practiceIdx = 0;
+
+      if (state.practiceMode) {
+        state.practiceSource = practiceSource.value;
+        if (state.practiceSource === "cache") {
+          var cached = getCachedRun();
+          if (cached.length) {
+            state.practiceResponses = cached;
+          } else {
+            state.practiceResponses = BUILTIN_PRACTICE;
+            showToast("Cache empty — using built-in demo sequence.", true);
+          }
+        } else {
+          state.practiceResponses = BUILTIN_PRACTICE;
+        }
+      } else if (!apiKeyInput.value.trim()) {
+        showToast("Enter the Claude API key, or turn on Practice mode.");
+        return;
+      }
+
+      ensureAudio();
+
+      setupScreen.classList.remove("active");
+      navScreen.classList.add("active");
+      modeBadge.style.display = state.practiceMode ? "block" : "none";
+      modeBadge.textContent = state.practiceMode
+        ? "PRACTICE MODE — no API calls"
+        : "";
+      if (!state.practiceMode && state.recordToCache) {
+        modeBadge.style.display = "block";
+        modeBadge.textContent = "● recording responses to practice cache";
+      }
+      hazardText.style.display = "none";
+      instructionText.textContent = "Navigation started. Tap the screen to begin.";
+      navStatus.textContent = "Tap anywhere for directions";
+      updateProgressText();
+
+      /* keep the screen awake if possible (cap-mounted phone) */
+      try {
+        if (navigator.wakeLock && navigator.wakeLock.request) {
+          navigator.wakeLock.request("screen").then(function (wl) { state.wakeLock = wl; }).catch(function () { /* ignore */ });
+        }
+      } catch (e) { /* ignore */ }
+
+      var announce = "Navigation started to " + state.map.waypoints[state.destIndex].label + ". Tap anywhere on the screen for your first direction.";
+
+      if (state.practiceMode) {
+        speak(announce);
+      } else {
+        startCamera().then(function () { speak(announce); });
+      }
+    } catch (e) {
+      showToast("Could not start: " + e.message);
+    }
+  });
+
+  /* Track previous instruction AFTER it is spoken, for the next request */
+  var origHandle = handleParsedResponse;
+  handleParsedResponse = function (resp, src) {
+    origHandle(resp, src);
+    if (resp && typeof resp.instruction === "string") state.prevInstruction = resp.instruction;
+  };
+
+  /* =============================== DEBUG PANEL =============================== */
+  debugLink.addEventListener("click", function (ev) {
+    ev.stopPropagation();
+    renderDebug();
+    debugPanel.classList.add("open");
+  });
+  debugCloseBtn.addEventListener("click", function () { debugPanel.classList.remove("open"); });
+  debugExitBtn.addEventListener("click", function () {
+    debugPanel.classList.remove("open");
+    stopCamera();
+    stopTicking();
+    try { window.speechSynthesis.cancel(); } catch (e) { /* ignore */ }
+    try { if (state.wakeLock) { state.wakeLock.release(); state.wakeLock = null; } } catch (e) { /* ignore */ }
+    state.busy = false;
+    tapButton.disabled = false;
+    tapButton.classList.remove("thinking");
+    navScreen.classList.remove("active");
+    setupScreen.classList.add("active");
+    refreshCacheInfo();
+  });
+
+  /* =============================== GLOBAL SAFETY NETS =============================== */
+  window.addEventListener("error", function (ev) {
+    stopTicking();
+    state.busy = false;
+    tapButton.disabled = false;
+    tapButton.classList.remove("thinking");
+    showToast("Error: " + (ev.message || "unknown"));
+  });
+  window.addEventListener("unhandledrejection", function (ev) {
+    stopTicking();
+    state.busy = false;
+    tapButton.disabled = false;
+    tapButton.classList.remove("thinking");
+    var msg = (ev.reason && ev.reason.message) ? ev.reason.message : "unknown";
+    showToast("Error: " + msg);
+  });
+
+  refreshStartEnabled();
+})();
+</script>
+</body>
+</html>
