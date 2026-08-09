@@ -91,6 +91,25 @@
 
   .hint { font-size: 12px; color: #777; margin-top: 6px; line-height: 1.4; }
   a.linkbtn { color: #ffd400; text-decoration: underline; font-size: 13px; }
+
+  /* ---------- Auto-pilot ---------- */
+  @keyframes autoTapRipple {
+    0% { box-shadow: inset 0 0 0 0 rgba(255,212,0,0.85); }
+    100% { box-shadow: inset 0 0 0 18px rgba(255,212,0,0); }
+  }
+  .autoTapped { animation: autoTapRipple 0.5s ease-out; }
+  #autoPilotBanner {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+    background: #ffd400; color: #000; padding: 10px 14px;
+    display: none; align-items: center; justify-content: space-between; gap: 10px;
+    font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  #autoPilotBanner.show { display: flex; }
+  #autoPilotBanner span { flex: 1; }
+  #autoPilotBanner button {
+    background: #000; color: #ffd400; border: none; border-radius: 8px; padding: 7px 12px;
+    font-size: 12px; font-weight: 800; cursor: pointer; text-transform: uppercase; flex: none;
+  }
 </style>
 </head>
 <body>
@@ -102,6 +121,7 @@
   <h2>⚡ Quick demo</h2>
   <p>Fill a complete mock route (location + 4 waypoints, photos, notes, transitions) and jump straight to Review — the fastest way to test that PathGuide can consume PathMapper's output end-to-end.</p>
   <button class="btn primary block" id="quickDemoBtn">Load complete mock route</button>
+  <button class="btn ghost block" id="autoPilotBtn" style="margin-top:8px;">🤖 Auto-pilot — walk through every step on a loop</button>
 </div>
 
 <div class="steps">
@@ -211,13 +231,18 @@
 
 <div id="toast"></div>
 
+<div id="autoPilotBanner">
+  <span>🤖 Auto-pilot running — walking through Scan → Form → Review → Publish on a loop</span>
+  <button id="autoPilotStopBtn" type="button">Stop</button>
+</div>
+
 <script>
 (function () {
   "use strict";
 
   var LS_KEY_MAPS = "pathmapper_maps";
 
-  var state = { waypoints: [], step: 1 };
+  var state = { waypoints: [], step: 1, autoPilot: false };
   var nextId = 1;
 
   function $(id) { return document.getElementById(id); }
@@ -234,6 +259,7 @@
       publishResult = $("publishResult"), nextStepsCard = $("nextStepsCard"),
       startNewBtn = $("startNewBtn"), clearAllMapsBtn = $("clearAllMapsBtn"), savedMapsInfo = $("savedMapsInfo"),
       quickDemoBtn = $("quickDemoBtn"), toast = $("toast");
+  var autoPilotBtn = $("autoPilotBtn"), autoPilotBanner = $("autoPilotBanner"), autoPilotStopBtn = $("autoPilotStopBtn");
 
   /* =============================== TOAST =============================== */
   var toastTimer = null;
@@ -628,6 +654,89 @@
     state.waypoints.forEach(fillMockText);
     goToStep(3);
     showToast("Quick demo route loaded — review below, then Publish.", "success");
+  });
+
+  /* =============================== AUTO-PILOT =============================== */
+  /* Drives the whole Scan -> Form -> Review -> Publish pipeline by itself, on a
+     loop, using the same mock generators as the manual buttons. Any real
+     (trusted) click anywhere on the page hands control back immediately. */
+  function wait(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+  function autoTapVisual(el) {
+    if (!el) return;
+    el.classList.remove("autoTapped");
+    void el.offsetWidth; /* restart the animation if it's already running */
+    el.classList.add("autoTapped");
+  }
+  function showAutoPilotBanner() { autoPilotBanner.classList.add("show"); }
+  function hideAutoPilotBanner() { autoPilotBanner.classList.remove("show"); }
+  function stopAutoPilot(silent) {
+    if (!state.autoPilot) return;
+    state.autoPilot = false;
+    hideAutoPilotBanner();
+    autoPilotBtn.textContent = "🤖 Auto-pilot — walk through every step on a loop";
+    if (!silent) showToast("Auto-pilot stopped — you're in control.", "info");
+  }
+  document.addEventListener("click", function (ev) {
+    if (!state.autoPilot || !ev.isTrusted) return;
+    if (ev.target === autoPilotStopBtn || ev.target === autoPilotBtn) return;
+    stopAutoPilot();
+  }, true);
+  autoPilotStopBtn.addEventListener("click", function (ev) { ev.stopPropagation(); stopAutoPilot(); });
+
+  async function runAutoPilotLoopMapper() {
+    while (state.autoPilot) {
+      state.waypoints = [];
+      locationName.value = "";
+      nextStepsCard.style.display = "none";
+      publishResult.innerHTML = "";
+      goToStep(1);
+      renderScan();
+      await wait(1000);
+      if (!state.autoPilot) break;
+
+      locationName.value = "Demo Home — Ground Floor";
+      await wait(700);
+      if (!state.autoPilot) break;
+
+      autoTapVisual(addMockRouteBtn);
+      addMockRouteBtn.click();
+      await wait(2400);
+      if (!state.autoPilot) break;
+
+      autoTapVisual(toFormBtn);
+      toFormBtn.click();
+      await wait(1500);
+      if (!state.autoPilot) break;
+
+      autoTapVisual(fillAllMockBtn);
+      fillAllMockBtn.click();
+      await wait(2000);
+      if (!state.autoPilot) break;
+
+      autoTapVisual(toReviewBtn);
+      toReviewBtn.click();
+      await wait(3200);
+      if (!state.autoPilot) break;
+
+      autoTapVisual(toPublishBtn);
+      toPublishBtn.click();
+      await wait(1200);
+      if (!state.autoPilot) break;
+
+      autoTapVisual(saveLocalBtn);
+      saveLocalBtn.click();
+      await wait(3800);
+      if (!state.autoPilot) break;
+    }
+    hideAutoPilotBanner();
+  }
+
+  autoPilotBtn.addEventListener("click", function () {
+    if (state.autoPilot) { stopAutoPilot(); return; }
+    state.autoPilot = true;
+    autoPilotBtn.textContent = "🤖 Auto-pilot running… (click to stop)";
+    showAutoPilotBanner();
+    runAutoPilotLoopMapper();
   });
 
   /* =============================== SAFETY NETS =============================== */

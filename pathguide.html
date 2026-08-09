@@ -90,6 +90,25 @@
 
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
   .thinking #navStatus { animation: pulse 0.9s infinite; }
+
+  /* ---------- Auto-pilot ---------- */
+  @keyframes autoTapRipple {
+    0% { box-shadow: inset 0 0 0 0 rgba(255,212,0,0.85); }
+    100% { box-shadow: inset 0 0 0 26px rgba(255,212,0,0); }
+  }
+  .autoTapped { animation: autoTapRipple 0.5s ease-out; }
+  #autoPilotBanner {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+    background: #ffd400; color: #000; padding: 10px 14px;
+    display: none; align-items: center; justify-content: space-between; gap: 10px;
+    font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  #autoPilotBanner.show { display: flex; }
+  #autoPilotBanner span { flex: 1; }
+  #autoPilotBanner button {
+    background: #000; color: #ffd400; border: none; border-radius: 8px; padding: 7px 12px;
+    font-size: 12px; font-weight: 800; cursor: pointer; text-transform: uppercase; flex: none;
+  }
 </style>
 </head>
 <body>
@@ -141,6 +160,11 @@
       <label class="switch"><input type="checkbox" id="recordToggle"><span class="slider"></span></label>
     </div>
     <button class="btn small" id="clearCacheBtn">Clear practice cache</button>
+    <div class="toggleRow">
+      <span>🤖 Auto-pilot (runs the whole demo by itself, on a loop)</span>
+      <label class="switch"><input type="checkbox" id="autoPilotToggle"><span class="slider"></span></label>
+    </div>
+    <div class="hint">Loads a built-in demo route automatically and drives every tap itself — no map or API key needed. Tap the main screen anytime to take manual control back.</div>
   </div>
 
   <button class="btn primary" id="startBtn" disabled>Start Navigation</button>
@@ -171,6 +195,11 @@
 
 <div id="toast"></div>
 
+<div id="autoPilotBanner">
+  <span>🤖 Auto-pilot running — tap the main button anytime to take over</span>
+  <button id="autoPilotStopBtn" type="button">Stop</button>
+</div>
+
 <script>
 (function () {
   "use strict";
@@ -194,7 +223,8 @@
     sessionLog: [],
     cameraStream: null,
     cameraOk: false,
-    wakeLock: null
+    wakeLock: null,
+    autoPilot: false
   };
 
   /* Built-in canned responses for Practice mode (demo insurance). */
@@ -206,6 +236,21 @@
     { localization: "Image is blurry, cannot confirm location.", instruction: "Please stop, hold still, and tap again to retake the photo.", hazard: null, arrived: false, advance_waypoint: false, confidence: "low" },
     { localization: "Destination area visible directly ahead.", instruction: "Take two small steps forward and stop.", hazard: null, arrived: true, advance_waypoint: true, confidence: "high" }
   ];
+
+  /* Self-contained demo map for Auto-pilot — no external map or PathMapper needed.
+     Photos are never rendered in this UI and Practice mode never sends them
+     anywhere, so a tiny placeholder is enough to satisfy the map schema. */
+  var TINY_PLACEHOLDER_PHOTO = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAA/AKp//9k=";
+  var BUILTIN_DEMO_MAP = {
+    map_version: 1,
+    location_name: "Demo Home — Auto-pilot",
+    waypoints: [
+      { id: "wp_1", order: 1, label: "Front Door", notes: "Entry point. Door opens inward, mat on the floor just inside.", transition_from_previous: "", photo_base64: TINY_PLACEHOLDER_PHOTO },
+      { id: "wp_2", order: 2, label: "Hallway Junction", notes: "Narrow hallway, small rug underfoot.", transition_from_previous: "From the front door, walk straight ahead about 6 small steps.", photo_base64: TINY_PLACEHOLDER_PHOTO },
+      { id: "wp_3", order: 3, label: "Kitchen Entrance", notes: "Tile flooring begins here; there is a slight step down.", transition_from_previous: "Turn right at the hallway junction, then walk forward about 4 small steps.", photo_base64: TINY_PLACEHOLDER_PHOTO },
+      { id: "wp_4", order: 4, label: "Medicine Shelf", notes: "Medicines on the left shelf, labeled bottles in the front row.", transition_from_previous: "From the kitchen entrance, walk straight ahead about 3 small steps; the shelf is on your left.", photo_base64: TINY_PLACEHOLDER_PHOTO }
+    ]
+  };
 
   /* =============================== DOM =============================== */
   function $(id) { return document.getElementById(id); }
@@ -222,6 +267,7 @@
       debugLink = $("debugLink"), debugPanel = $("debugPanel"), debugLog = $("debugLog"),
       debugCloseBtn = $("debugCloseBtn"), debugExitBtn = $("debugExitBtn"),
       camVideo = $("camVideo"), fallbackInput = $("fallbackInput"), toast = $("toast");
+  var autoPilotToggle = $("autoPilotToggle"), autoPilotBanner = $("autoPilotBanner"), autoPilotStopBtn = $("autoPilotStopBtn");
 
   /* =============================== TOASTS =============================== */
   var toastTimer = null;
@@ -776,11 +822,74 @@
       else { state.busy = false; tapButton.disabled = false; tapButton.classList.remove("thinking"); }
     });
   }
-  tapButton.addEventListener("click", onTap);
+  /* =============================== AUTO-PILOT =============================== */
+  /* Drives the whole demo by itself — like a Selenium script — using Practice
+     mode's mocked data and a self-contained demo map, on a continuous loop.
+     A real (trusted) tap on the main button hands control back immediately. */
+  function wait(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+  function autoTapVisual(el) {
+    if (!el) return;
+    el.classList.remove("autoTapped");
+    void el.offsetWidth; /* restart the animation if it's already running */
+    el.classList.add("autoTapped");
+  }
+  function showAutoPilotBanner() { autoPilotBanner.classList.add("show"); }
+  function hideAutoPilotBanner() { autoPilotBanner.classList.remove("show"); }
+  function stopAutoPilot(silent) {
+    if (!state.autoPilot) return;
+    state.autoPilot = false;
+    hideAutoPilotBanner();
+    if (!silent) showToast("Auto-pilot stopped — you're in control.", true);
+  }
+  autoPilotStopBtn.addEventListener("click", function (ev) { ev.stopPropagation(); stopAutoPilot(); });
+  autoPilotToggle.addEventListener("change", function () {
+    if (autoPilotToggle.checked) {
+      practiceToggle.checked = true; /* auto-pilot always uses mocked data */
+      if (!state.map) setMap(BUILTIN_DEMO_MAP);
+    }
+  });
+
+  function resetNavForNextCycle() {
+    state.currentIndex = 0;
+    state.prevInstruction = "None yet — this is the first request.";
+    state.arrivedDone = false;
+    state.practiceIdx = 0;
+    hazardText.style.display = "none";
+    instructionText.textContent = "Navigation started. Tap the screen to begin.";
+    navStatus.textContent = "Tap anywhere for directions";
+    updateProgressText();
+  }
+
+  async function runAutoPilotLoop() {
+    while (state.autoPilot) {
+      var guard = 0;
+      while (state.autoPilot && !state.arrivedDone && guard < 15) {
+        autoTapVisual(tapButton);
+        tapButton.click();
+        await wait(2900);
+        guard++;
+      }
+      if (!state.autoPilot) break;
+      await wait(4200); /* hold on the arrival message so viewers can read it */
+      if (!state.autoPilot) break;
+      resetNavForNextCycle();
+      await wait(1300);
+    }
+    hideAutoPilotBanner();
+  }
+
+  tapButton.addEventListener("click", function (ev) {
+    if (state.autoPilot && ev.isTrusted) stopAutoPilot();
+    onTap();
+  });
 
   /* =============================== START / EXIT =============================== */
   startBtn.addEventListener("click", function () {
     try {
+      if (autoPilotToggle.checked) {
+        practiceToggle.checked = true;
+        if (!state.map) setMap(BUILTIN_DEMO_MAP);
+      }
       if (!state.map) { showToast("Load a map first."); return; }
       state.destIndex = parseInt(destSelect.value, 10);
       if (isNaN(state.destIndex) || state.destIndex < 0 || state.destIndex >= state.map.waypoints.length) {
@@ -840,6 +949,12 @@
       } else {
         startCamera().then(function () { speak(announce); });
       }
+
+      if (autoPilotToggle.checked) {
+        state.autoPilot = true;
+        showAutoPilotBanner();
+        runAutoPilotLoop();
+      }
     } catch (e) {
       showToast("Could not start: " + e.message);
     }
@@ -860,6 +975,7 @@
   });
   debugCloseBtn.addEventListener("click", function () { debugPanel.classList.remove("open"); });
   debugExitBtn.addEventListener("click", function () {
+    stopAutoPilot(true);
     debugPanel.classList.remove("open");
     stopCamera();
     stopTicking();

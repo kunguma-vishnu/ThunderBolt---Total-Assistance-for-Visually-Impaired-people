@@ -122,6 +122,25 @@
 
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
   .thinking #sweepStatus, .thinking #guideStatus { animation: pulse 0.9s infinite; }
+
+  /* ---------- Auto-pilot ---------- */
+  @keyframes autoTapRipple {
+    0% { box-shadow: inset 0 0 0 0 rgba(255,212,0,0.85); }
+    100% { box-shadow: inset 0 0 0 26px rgba(255,212,0,0); }
+  }
+  .autoTapped { animation: autoTapRipple 0.5s ease-out; }
+  #autoPilotBanner {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+    background: #ffd400; color: #000; padding: 10px 14px;
+    display: none; align-items: center; justify-content: space-between; gap: 10px;
+    font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  #autoPilotBanner.show { display: flex; }
+  #autoPilotBanner span { flex: 1; }
+  #autoPilotBanner button {
+    background: #000; color: #ffd400; border: none; border-radius: 8px; padding: 7px 12px;
+    font-size: 12px; font-weight: 800; cursor: pointer; text-transform: uppercase; flex: none;
+  }
 </style>
 </head>
 <body>
@@ -163,6 +182,11 @@
       <label class="switch"><input type="checkbox" id="practiceToggle"><span class="slider"></span></label>
     </div>
     <div class="hint">Live mode calls Claude through this site's serverless proxy (needs the deployed site + ANTHROPIC_API_KEY set in Netlify). Practice mode works fully offline — perfect demo insurance.</div>
+    <div class="toggleRow">
+      <span>🤖 Auto-pilot (runs the whole demo by itself, on a loop)</span>
+      <label class="switch"><input type="checkbox" id="autoPilotToggle"><span class="slider"></span></label>
+    </div>
+    <div class="hint">Drives every tap itself using Practice mode data — sweep, search, guide, repeat — like a scripted walkthrough. Tap the main screen anytime to take manual control back.</div>
   </div>
 
   <button class="btn primary block big" id="startBtn">Start 360° Search</button>
@@ -220,6 +244,11 @@
 
 <div id="toast"></div>
 
+<div id="autoPilotBanner">
+  <span>🤖 Auto-pilot running — tap the main button anytime to take over</span>
+  <button id="autoPilotStopBtn" type="button">Stop</button>
+</div>
+
 <script>
 (function () {
   "use strict";
@@ -246,7 +275,8 @@
     practiceGuideIdx: 0,
     sessionLog: [],
     cameraStream: null,
-    cameraOk: false
+    cameraOk: false,
+    autoPilot: false
   };
 
   /* Canned responses (practice mode / demo insurance) */
@@ -283,6 +313,7 @@
   var newSearchLink = $("newSearchLink"), guideDebugLink = $("guideDebugLink");
   var debugPanel = $("debugPanel"), debugLog = $("debugLog"), debugCloseBtn = $("debugCloseBtn");
   var camVideo = $("camVideo"), toast = $("toast");
+  var autoPilotToggle = $("autoPilotToggle"), autoPilotBanner = $("autoPilotBanner"), autoPilotStopBtn = $("autoPilotStopBtn");
 
   /* =============================== TOAST / LOG =============================== */
   var toastTimer = null;
@@ -893,7 +924,65 @@
     return dir;
   }
 
-  sweepTap.addEventListener("click", onSweepTap);
+  /* =============================== AUTO-PILOT =============================== */
+  /* Drives the whole demo by itself — like a Selenium script — using Practice
+     mode's mocked data on a continuous loop. A real (trusted) tap on either
+     giant button hands control back to the human immediately. */
+  function wait(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+  function autoTapVisual(el) {
+    if (!el) return;
+    el.classList.remove("autoTapped");
+    void el.offsetWidth; /* restart the animation if it's already running */
+    el.classList.add("autoTapped");
+  }
+  function showAutoPilotBanner() { autoPilotBanner.classList.add("show"); }
+  function hideAutoPilotBanner() { autoPilotBanner.classList.remove("show"); }
+  function stopAutoPilot(silent) {
+    if (!state.autoPilot) return;
+    state.autoPilot = false;
+    hideAutoPilotBanner();
+    if (!silent) showToast("Auto-pilot stopped — you're in control.", "info");
+  }
+  autoPilotStopBtn.addEventListener("click", function (ev) { ev.stopPropagation(); stopAutoPilot(); });
+
+  async function runAutoPilotLoop() {
+    while (state.autoPilot) {
+      if (!state.autoPilot) break;
+      autoTapVisual(mockRealBtn);
+      mockRealBtn.click();
+      await wait(1700);
+
+      if (!state.autoPilot) break;
+      autoTapVisual(searchNowBtn);
+      searchNowBtn.click();
+      await wait(2800);
+
+      if (!state.autoPilot) break;
+      if (state.phase === "guide") {
+        var guard = 0;
+        while (state.autoPilot && !state.reachedDone && guard < 12) {
+          autoTapVisual(guideTap);
+          guideTap.click();
+          await wait(2900);
+          guard++;
+        }
+        if (!state.autoPilot) break;
+        await wait(4200); /* hold on "Reached!" so viewers can read it */
+      } else {
+        await wait(2500); /* not-found path — brief hold before retrying */
+      }
+
+      if (!state.autoPilot) break;
+      newSearchLink.click(); /* resets state and returns straight to the sweep screen */
+      await wait(1300);
+    }
+    hideAutoPilotBanner();
+  }
+
+  sweepTap.addEventListener("click", function (ev) {
+    if (state.autoPilot && ev.isTrusted) stopAutoPilot();
+    onSweepTap();
+  });
   searchNowBtn.addEventListener("click", function () { if (!state.busy) runSearch(); });
   mockRealBtn.addEventListener("click", function () {
     DIRECTIONS.forEach(function (dir) { setPhoto(dir, REAL_SWEEP_PHOTOS[dir]); });
@@ -925,6 +1014,7 @@
     speak("Photos cleared. Face forward, then tap.");
   });
   backToSetupBtn.addEventListener("click", function () {
+    stopAutoPilot(true);
     stopCamera(); stopTicking();
     try { window.speechSynthesis.cancel(); } catch (e) { /* ignore */ }
     goToScreen("setup");
@@ -1034,7 +1124,10 @@
     guideTap.classList.remove("thinking");
     if (!state.reachedDone) guideStatus.textContent = "Tap for next step";
   }
-  guideTap.addEventListener("click", onGuideTap);
+  guideTap.addEventListener("click", function (ev) {
+    if (state.autoPilot && ev.isTrusted) stopAutoPilot();
+    onGuideTap();
+  });
 
   newSearchLink.addEventListener("click", function (ev) {
     ev.stopPropagation();
@@ -1050,9 +1143,14 @@
   document.querySelectorAll(".chip").forEach(function (chip) {
     chip.addEventListener("click", function () { objectInput.value = chip.getAttribute("data-obj"); });
   });
+  autoPilotToggle.addEventListener("change", function () {
+    if (autoPilotToggle.checked) practiceToggle.checked = true; /* auto-pilot always uses mocked data */
+  });
+
   startBtn.addEventListener("click", function () {
     var obj = objectInput.value.trim();
     if (!obj) { showToast("Type what you are looking for."); return; }
+    if (autoPilotToggle.checked) practiceToggle.checked = true;
     state.object = obj;
     state.practiceMode = practiceToggle.checked;
     state.found = null;
@@ -1067,6 +1165,11 @@
       speak(announce);
     } else {
       startCamera().then(function () { speak(announce); });
+    }
+    if (autoPilotToggle.checked) {
+      state.autoPilot = true;
+      showAutoPilotBanner();
+      runAutoPilotLoop();
     }
   });
 
