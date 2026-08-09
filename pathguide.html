@@ -116,18 +116,12 @@
   </div>
 
   <div class="card">
-    <h2>2. Claude API key</h2>
-    <input type="password" id="apiKey" placeholder="sk-ant-..." autocomplete="off">
-    <div class="hint">Stored in this phone's localStorage only. Not needed in Practice mode.</div>
-  </div>
-
-  <div class="card">
-    <h2>3. Destination</h2>
+    <h2>2. Destination</h2>
     <select id="destSelect" disabled><option>Load a map first</option></select>
   </div>
 
   <div class="card">
-    <h2>4. Demo options</h2>
+    <h2>3. Demo options</h2>
     <div class="toggleRow">
       <span>Practice mode (no API — replay canned responses)</span>
       <label class="switch"><input type="checkbox" id="practiceToggle"><span class="slider"></span></label>
@@ -180,7 +174,6 @@
   "use strict";
 
   /* =============================== STATE =============================== */
-  var LS_KEY_API = "pathguide_api_key";
   var LS_KEY_CACHE = "pathguide_practice_cache";
   var LS_KEY_PATHMAPPER = "pathmapper_maps";
 
@@ -218,7 +211,7 @@
   var mapFile = $("mapFile"), mapPaste = $("mapPaste"), loadPasteBtn = $("loadPasteBtn"),
       loadLocalBtn = $("loadLocalBtn"), mapPickerWrap = $("mapPickerWrap"), mapPicker = $("mapPicker"),
       mapPickerLoadBtn = $("mapPickerLoadBtn"), mapStatus = $("mapStatus"),
-      apiKeyInput = $("apiKey"), destSelect = $("destSelect"),
+      destSelect = $("destSelect"),
       practiceToggle = $("practiceToggle"), practiceOptions = $("practiceOptions"),
       practiceSource = $("practiceSource"), cacheInfo = $("cacheInfo"),
       recordToggle = $("recordToggle"), clearCacheBtn = $("clearCacheBtn"), startBtn = $("startBtn"),
@@ -406,13 +399,7 @@
     } catch (e) { showToast("Could not load selected map: " + e.message); }
   });
 
-  /* =============================== SETUP: KEY / TOGGLES =============================== */
-  try { apiKeyInput.value = localStorage.getItem(LS_KEY_API) || ""; } catch (e) { /* ignore */ }
-  apiKeyInput.addEventListener("input", function () {
-    try { localStorage.setItem(LS_KEY_API, apiKeyInput.value.trim()); } catch (e) { /* ignore */ }
-    refreshStartEnabled();
-  });
-
+  /* =============================== SETUP: TOGGLES =============================== */
   function getCachedRun() {
     try {
       var raw = localStorage.getItem(LS_KEY_CACHE);
@@ -441,9 +428,7 @@
   });
 
   function refreshStartEnabled() {
-    var haveMap = !!state.map;
-    var haveKey = !!apiKeyInput.value.trim();
-    startBtn.disabled = !(haveMap && (haveKey || practiceToggle.checked));
+    startBtn.disabled = !state.map;
   }
 
   /* =============================== CAMERA =============================== */
@@ -602,13 +587,10 @@
     return blocks;
   }
 
+  /* Calls go through our own Netlify Function (/.netlify/functions/claude-proxy),
+     which holds ANTHROPIC_API_KEY server-side. The browser never sees the key. */
   function callClaude(liveDataUrl) {
-    var key = "";
-    try { key = localStorage.getItem(LS_KEY_API) || ""; } catch (e) { /* ignore */ }
-    if (!key) return Promise.reject(new Error("No API key saved."));
-
     var body = {
-      model: "claude-sonnet-4-6",
       max_tokens: 500,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: buildContentBlocks(liveDataUrl) }]
@@ -617,14 +599,9 @@
     var controller = ("AbortController" in window) ? new AbortController() : null;
     var timeoutId = controller ? setTimeout(function () { controller.abort(); }, 60000) : null;
 
-    return fetch("https://api.anthropic.com/v1/messages", {
+    return fetch("/.netlify/functions/claude-proxy", {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true"
-      },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
       signal: controller ? controller.signal : undefined
     }).then(function (res) {
@@ -828,9 +805,6 @@
         } else {
           state.practiceResponses = BUILTIN_PRACTICE;
         }
-      } else if (!apiKeyInput.value.trim()) {
-        showToast("Enter the Claude API key, or turn on Practice mode.");
-        return;
       }
 
       ensureAudio();
