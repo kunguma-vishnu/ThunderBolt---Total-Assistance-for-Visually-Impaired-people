@@ -1,0 +1,38 @@
+{
+  "map_version": 1,
+  "location_name": "Demo Home — Ground Floor (fixture)",
+  "waypoints": [
+    {
+      "id": "wp_1",
+      "order": 1,
+      "label": "Front Door",
+      "notes": "Entry point. Door opens inward, mat on the floor just inside.",
+      "transition_from_previous": "",
+      "photo_base64": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAAeACgDASIAAhEBAxEB/8QAFwABAQEBAAAAAAAAAAAAAAAAAAUGB//EACIQAAICAgEDBQAAAAAAAAAAAAECAAMEEQUSIUETIjFRYf/EABUBAQEAAAAAAAAAAAAAAAAAAAME/8QAGREBAQEBAQEAAAAAAAAAAAAAAQARAiFB/9oADAMBAAIRAxEAPwDpuVlV4lDW2HsPA8mYblOTvz7SbGKoD7ax8D9/ZS5PMOVeVU/pIdD9+ZAtG2MjnvXkusYPZgVne9GIBNQ3IJUmt+8CJmsWDeVlTKZoDEfyIiCVj7f/2Q=="
+    },
+    {
+      "id": "wp_2",
+      "order": 2,
+      "label": "Hallway Junction",
+      "notes": "Narrow hallway, small rug underfoot — avoid catching a foot on the edge.",
+      "transition_from_previous": "From the front door, walk straight ahead about 6 small steps.",
+      "photo_base64": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAAeACgDASIAAhEBAxEB/8QAFwABAQEBAAAAAAAAAAAAAAAAAAUGB//EACIQAAICAgEDBQAAAAAAAAAAAAECAAMEEQUSIUETIjFRYf/EABUBAQEAAAAAAAAAAAAAAAAAAAME/8QAGREBAQEBAQEAAAAAAAAAAAAAAQARAiFB/9oADAMBAAIRAxEAPwDpuVlV4lDW2HsPA8mYblOTvz7SbGKoD7ax8D9/ZS5PMOVeVU/pIdD9+ZAtG2MjnvXkusYPZgVne9GIBNQ3IJUmt+8CJmsWDeVlTKZoDEfyIiCVj7f/2Q=="
+    },
+    {
+      "id": "wp_3",
+      "order": 3,
+      "label": "Kitchen Entrance",
+      "notes": "Tile flooring begins here; there is a slight step down.",
+      "transition_from_previous": "Turn right at the hallway junction, then walk forward about 4 small steps.",
+      "photo_base64": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAAeACgDASIAAhEBAxEB/8QAFwABAQEBAAAAAAAAAAAAAAAAAAUGB//EACIQAAICAgEDBQAAAAAAAAAAAAECAAMEEQUSIUETIjFRYf/EABUBAQEAAAAAAAAAAAAAAAAAAAME/8QAGREBAQEBAQEAAAAAAAAAAAAAAQARAiFB/9oADAMBAAIRAxEAPwDpuVlV4lDW2HsPA8mYblOTvz7SbGKoD7ax8D9/ZS5PMOVeVU/pIdD9+ZAtG2MjnvXkusYPZgVne9GIBNQ3IJUmt+8CJmsWDeVlTKZoDEfyIiCVj7f/2Q=="
+    },
+    {
+      "id": "wp_4",
+      "order": 4,
+      "label": "Medicine Shelf",
+      "notes": "Medicines on the left shelf, labeled bottles in the front row.",
+      "transition_from_previous": "From the kitchen entrance, walk straight ahead about 3 small steps; the shelf is on your left.",
+      "photo_base64": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAAeACgDASIAAhEBAxEB/8QAFwABAQEBAAAAAAAAAAAAAAAAAAUGB//EACIQAAICAgEDBQAAAAAAAAAAAAECAAMEEQUSIUETIjFRYf/EABUBAQEAAAAAAAAAAAAAAAAAAAME/8QAGREBAQEBAQEAAAAAAAAAAAAAAQARAiFB/9oADAMBAAIRAxEAPwDpuVlV4lDW2HsPA8mYblOTvz7SbGKoD7ax8D9/ZS5PMOVeVU/pIdD9+ZAtG2MjnvXkusYPZgVne9GIBNQ3IJUmt+8CJmsWDeVlTKZoDEfyIiCVj7f/2Q=="
+    }
+  ]
+}
