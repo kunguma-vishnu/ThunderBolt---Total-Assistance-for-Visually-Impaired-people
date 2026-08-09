@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#000000">
+<title>PathMapper</title>
+<style>
+  /* ============ PathMapper — builds the map JSON that PathGuide consumes ============ */
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { min-height: 100%; background: #111; color: #fff; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+  body { padding: 16px 16px 60px; max-width: 720px; margin: 0 auto; }
+
+  h1 { font-size: 26px; color: #ffd400; }
+  .sub { color: #999; font-size: 13px; margin-top: 2px; margin-bottom: 16px; }
+
+  .banner {
+    background: #1c1c1e; border: 1px solid #ffd400; border-radius: 12px; padding: 14px; margin-bottom: 18px;
+  }
+  .banner h2 { font-size: 14px; color: #ffd400; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .banner p { font-size: 13px; color: #bbb; margin-bottom: 10px; line-height: 1.4; }
+
+  .steps { display: flex; gap: 6px; margin-bottom: 18px; }
+  .step-tab {
+    flex: 1; text-align: center; padding: 10px 4px; border-radius: 8px; background: #1c1c1e;
+    border: 1px solid #333; color: #888; font-size: 12px; font-weight: 700; cursor: pointer;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .step-tab .num {
+    display: block; font-size: 15px; margin-bottom: 2px;
+  }
+  .step-tab.active { background: #ffd400; color: #000; border-color: #ffd400; }
+  .step-tab.done { border-color: #4cd964; color: #4cd964; }
+  .step-tab.done.active { background: #ffd400; color: #000; }
+
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  .card { background: #1c1c1e; border: 1px solid #333; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+  .card h2 { font-size: 15px; color: #ffd400; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  label { display: block; font-size: 13px; color: #bbb; margin: 10px 0 4px; }
+  input[type="text"], textarea {
+    width: 100%; background: #000; color: #fff; border: 1px solid #444; border-radius: 8px;
+    padding: 10px; font-size: 15px; font-family: inherit;
+  }
+  textarea { min-height: 60px; resize: vertical; }
+  input[type="file"] { width: 100%; color: #ccc; font-size: 13px; padding: 6px 0; }
+
+  .btn {
+    display: inline-block; padding: 11px 16px; border: none; border-radius: 10px;
+    background: #333; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .btn:active { background: #444; }
+  .btn.primary { background: #ffd400; color: #000; }
+  .btn.primary:disabled { background: #555; color: #999; cursor: not-allowed; }
+  .btn.danger { background: #b3261e; color: #fff; }
+  .btn.ghost { background: transparent; border: 1px solid #444; color: #ccc; }
+  .btn.block { display: block; width: 100%; text-align: center; }
+  .btn.small { padding: 7px 10px; font-size: 12px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .row.spread { justify-content: space-between; align-items: center; }
+
+  .wpCard {
+    display: flex; gap: 12px; background: #17171a; border: 1px solid #2c2c2e; border-radius: 10px;
+    padding: 10px; margin-bottom: 10px; align-items: flex-start;
+  }
+  .wpCard img { width: 84px; height: 64px; object-fit: cover; border-radius: 6px; background: #000; flex: none; }
+  .wpCard .thumbPh { width: 84px; height: 64px; border-radius: 6px; background: #2c2c2e; flex: none; display: flex; align-items: center; justify-content: center; color: #666; font-size: 11px; text-align: center; }
+  .wpCard .body { flex: 1; min-width: 0; }
+  .wpCard .order { color: #ffd400; font-weight: 800; font-size: 13px; }
+  .wpCard .label { font-size: 15px; font-weight: 700; margin: 2px 0; word-break: break-word; }
+  .wpCard .notes, .wpCard .transition { font-size: 12px; color: #999; margin-top: 2px; word-break: break-word; }
+  .wpCard .ctrls { display: flex; flex-direction: column; gap: 4px; flex: none; }
+
+  .warn { background: #3a2a00; border: 1px solid #ff9f0a; color: #ffcc66; border-radius: 8px; padding: 10px; font-size: 12px; margin-bottom: 12px; line-height: 1.4; }
+  .ok { background: #0d2a12; border: 1px solid #4cd964; color: #9ce8ab; border-radius: 8px; padding: 10px; font-size: 12px; margin-bottom: 12px; line-height: 1.4; }
+
+  pre#jsonPreview {
+    background: #000; border: 1px solid #333; border-radius: 8px; padding: 10px; font-size: 11px;
+    max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word; color: #9ce8ab;
+    display: none; margin-top: 10px;
+  }
+
+  #toast {
+    position: fixed; top: 14px; left: 12px; right: 12px; z-index: 100;
+    background: #b3261e; color: #fff; padding: 12px 14px; border-radius: 10px;
+    font-size: 14px; font-weight: 600; display: none; text-align: center;
+  }
+  #toast.info { background: #2c2c2e; }
+  #toast.success { background: #10331a; border: 1px solid #4cd964; }
+
+  .hint { font-size: 12px; color: #777; margin-top: 6px; line-height: 1.4; }
+  a.linkbtn { color: #ffd400; text-decoration: underline; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<h1>PathMapper</h1>
+<div class="sub">Build a route map for PathGuide — used by a sighted helper. Every step below has a one-tap mock so the whole pipeline can be demoed without walking a real space.</div>
+
+<div class="banner">
+  <h2>⚡ Quick demo</h2>
+  <p>Fill a complete mock route (location + 4 waypoints, photos, notes, transitions) and jump straight to Review — the fastest way to test that PathGuide can consume PathMapper's output end-to-end.</p>
+  <button class="btn primary block" id="quickDemoBtn">Load complete mock route</button>
+</div>
+
+<div class="steps">
+  <div class="step-tab active" data-step="1"><span class="num">①</span>Scan</div>
+  <div class="step-tab" data-step="2"><span class="num">②</span>Form</div>
+  <div class="step-tab" data-step="3"><span class="num">③</span>Review</div>
+  <div class="step-tab" data-step="4"><span class="num">④</span>Publish</div>
+</div>
+
+<!-- ================= STEP 1: SCAN ================= -->
+<div class="panel active" id="panel1">
+  <div class="card">
+    <h2>Location</h2>
+    <label>Location name</label>
+    <input type="text" id="locationName" placeholder="e.g. Home — Ground Floor">
+  </div>
+
+  <div class="card">
+    <h2>Capture waypoints</h2>
+    <div class="hint">Walk the route and capture a photo at each turn, doorway, or landmark, in order. No real space handy? Use a mock photo instead — it generates a labeled placeholder image so the rest of the pipeline is fully testable.</div>
+    <div class="row">
+      <input type="file" id="camInput" accept="image/*" capture="environment" style="display:none">
+      <button class="btn primary" id="capturePhotoBtn">📷 Capture / upload photo</button>
+      <button class="btn ghost" id="addMockPhotoBtn">🧪 Add mock photo</button>
+      <button class="btn ghost" id="addMockRouteBtn">🧪 Add 4 mock waypoints</button>
+    </div>
+  </div>
+
+  <div id="scanList"></div>
+
+  <div class="row spread">
+    <span></span>
+    <button class="btn primary" id="toFormBtn" disabled>Next: Form →</button>
+  </div>
+</div>
+
+<!-- ================= STEP 2: FORM ================= -->
+<div class="panel" id="panel2">
+  <div class="card">
+    <h2>Describe each waypoint</h2>
+    <div class="hint">Label, notes (spoken on arrival if this is the destination), and how to get here from the previous waypoint (used to build turn-by-turn context for Claude).</div>
+    <div class="row">
+      <button class="btn ghost" id="fillAllMockBtn">🧪 Fill all with mock text</button>
+    </div>
+  </div>
+
+  <div id="formList"></div>
+
+  <div class="row spread">
+    <button class="btn ghost" id="backTo1Btn">← Back: Scan</button>
+    <button class="btn primary" id="toReviewBtn" disabled>Next: Review →</button>
+  </div>
+</div>
+
+<!-- ================= STEP 3: REVIEW ================= -->
+<div class="panel" id="panel3">
+  <div class="card">
+    <h2>Review</h2>
+    <div id="reviewWarnings"></div>
+    <div id="reviewSummary"></div>
+  </div>
+
+  <div id="reviewList"></div>
+
+  <div class="card">
+    <button class="btn ghost small" id="togglePreviewBtn">Show/hide raw JSON</button>
+    <pre id="jsonPreview"></pre>
+  </div>
+
+  <div class="row spread">
+    <button class="btn ghost" id="backTo2Btn">← Back: Form</button>
+    <button class="btn primary" id="toPublishBtn" disabled>Next: Publish →</button>
+  </div>
+</div>
+
+<!-- ================= STEP 4: PUBLISH ================= -->
+<div class="panel" id="panel4">
+  <div class="card">
+    <h2>Publish</h2>
+    <div class="hint">Saving here writes into <code>localStorage.pathmapper_maps</code> on this browser/origin. If PathGuide is opened on the same site, its "Load from PathMapper" button on the Setup screen will pick this map up immediately — that's the full pipeline, end to end.</div>
+    <button class="btn primary block" id="saveLocalBtn">💾 Save to this browser (pathmapper_maps)</button>
+    <div class="row">
+      <button class="btn ghost" id="downloadJsonBtn">⬇ Download map.json</button>
+      <button class="btn ghost" id="copyJsonBtn">📋 Copy JSON</button>
+    </div>
+    <div id="publishResult"></div>
+  </div>
+
+  <div class="card" id="nextStepsCard" style="display:none;">
+    <h2>Next steps</h2>
+    <p class="hint">Map saved. Now test the other half of the pipeline:</p>
+    <div class="row">
+      <a class="btn primary" id="openPathGuideLink" href="./pathguide.html" target="_blank" rel="noopener">Open PathGuide with this map ready →</a>
+    </div>
+    <div class="hint" style="margin-top:10px;">In PathGuide's Setup screen, tap "Load from PathMapper (localStorage pathmapper_maps)" — this route will be listed. Pick a destination and start navigation (use Practice mode to test without an API key).</div>
+  </div>
+
+  <div class="card">
+    <h2>Manage</h2>
+    <div class="row">
+      <button class="btn ghost" id="startNewBtn">Start a new map</button>
+      <button class="btn danger" id="clearAllMapsBtn">Clear all saved maps</button>
+    </div>
+    <div class="hint" id="savedMapsInfo"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var LS_KEY_MAPS = "pathmapper_maps";
+
+  var state = { waypoints: [], step: 1 };
+  var nextId = 1;
+
+  function $(id) { return document.getElementById(id); }
+  var locationName = $("locationName");
+  var camInput = $("camInput"), capturePhotoBtn = $("capturePhotoBtn"),
+      addMockPhotoBtn = $("addMockPhotoBtn"), addMockRouteBtn = $("addMockRouteBtn"),
+      scanList = $("scanList"), toFormBtn = $("toFormBtn"),
+      fillAllMockBtn = $("fillAllMockBtn"), formList = $("formList"),
+      backTo1Btn = $("backTo1Btn"), toReviewBtn = $("toReviewBtn"),
+      reviewWarnings = $("reviewWarnings"), reviewSummary = $("reviewSummary"), reviewList = $("reviewList"),
+      togglePreviewBtn = $("togglePreviewBtn"), jsonPreview = $("jsonPreview"),
+      backTo2Btn = $("backTo2Btn"), toPublishBtn = $("toPublishBtn"),
+      saveLocalBtn = $("saveLocalBtn"), downloadJsonBtn = $("downloadJsonBtn"), copyJsonBtn = $("copyJsonBtn"),
+      publishResult = $("publishResult"), nextStepsCard = $("nextStepsCard"),
+      startNewBtn = $("startNewBtn"), clearAllMapsBtn = $("clearAllMapsBtn"), savedMapsInfo = $("savedMapsInfo"),
+      quickDemoBtn = $("quickDemoBtn"), toast = $("toast");
+
+  /* =============================== TOAST =============================== */
+  var toastTimer = null;
+  function showToast(msg, kind) {
+    toast.textContent = msg;
+    toast.className = kind || "";
+    toast.style.display = "block";
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toast.style.display = "none"; }, 4000);
+  }
+
+  /* =============================== STEP NAV =============================== */
+  function goToStep(n) {
+    state.step = n;
+    document.querySelectorAll(".step-tab").forEach(function (tab) {
+      var s = parseInt(tab.getAttribute("data-step"), 10);
+      tab.classList.toggle("active", s === n);
+      tab.classList.toggle("done", s < n);
+    });
+    document.querySelectorAll(".panel").forEach(function (p) { p.classList.remove("active"); });
+    $("panel" + n).classList.add("active");
+    if (n === 2) renderForm();
+    if (n === 3) renderReview();
+    if (n === 4) renderPublish();
+    window.scrollTo(0, 0);
+  }
+  document.querySelectorAll(".step-tab").forEach(function (tab) {
+    tab.addEventListener("click", function () { goToStep(parseInt(tab.getAttribute("data-step"), 10)); });
+  });
+  toFormBtn.addEventListener("click", function () { goToStep(2); });
+  backTo1Btn.addEventListener("click", function () { goToStep(1); });
+  toReviewBtn.addEventListener("click", function () { goToStep(3); });
+  backTo2Btn.addEventListener("click", function () { goToStep(2); });
+  toPublishBtn.addEventListener("click", function () { goToStep(4); });
+
+  /* =============================== MOCK PHOTO GENERATOR =============================== */
+  /* Draws a labeled placeholder image on canvas — stands in for a real camera
+     capture so the whole pipeline can be exercised without walking a space. */
+  function makeMockPhoto(labelText, index) {
+    var w = 320, h = 240;
+    var canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    var ctx = canvas.getContext("2d");
+    var hue = (index * 47) % 360;
+    var grad = ctx.createLinearGradient(0, 0, w, h);
+    grad.addColorStop(0, "hsl(" + hue + ", 55%, 30%)");
+    grad.addColorStop(1, "hsl(" + ((hue + 40) % 360) + ", 55%, 18%)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+
+    /* simple location-pin glyph */
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.beginPath();
+    ctx.arc(w / 2, h / 2 - 18, 22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(w / 2 - 16, h / 2 - 6);
+    ctx.lineTo(w / 2 + 16, h / 2 - 6);
+    ctx.lineTo(w / 2, h / 2 + 26);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "hsl(" + hue + ", 55%, 25%)";
+    ctx.font = "bold 20px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(String(index), w / 2, h / 2 - 18);
+
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(0, h - 34, w, 34);
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 14px sans-serif";
+    ctx.fillText("MOCK PHOTO — " + labelText, w / 2, h - 17);
+
+    return canvas.toDataURL("image/jpeg", 0.7);
+  }
+
+  var MOCK_ROUTE = [
+    { label: "Front Door", notes: "Entry point. Door opens inward, mat on the floor just inside.", transition: "" },
+    { label: "Hallway Junction", notes: "Narrow hallway, small rug underfoot — avoid catching a foot on the edge.", transition: "From the front door, walk straight ahead about 6 small steps." },
+    { label: "Kitchen Entrance", notes: "Tile flooring begins here; there is a slight step down.", transition: "Turn right at the hallway junction, then walk forward about 4 small steps." },
+    { label: "Medicine Shelf", notes: "Medicines on the left shelf, labeled bottles in the front row.", transition: "From the kitchen entrance, walk straight ahead about 3 small steps; the shelf is on your left." }
+  ];
+
+  /* =============================== SCAN STEP =============================== */
+  function addWaypoint(photoDataUrl, label) {
+    state.waypoints.push({
+      id: "wp_" + (nextId++),
+      order: state.waypoints.length + 1,
+      label: label || ("Waypoint " + state.waypoints.length),
+      notes: "",
+      transition_from_previous: "",
+      photo_base64: photoDataUrl
+    });
+    renumber();
+    renderScan();
+  }
+  function renumber() {
+    state.waypoints.forEach(function (wp, i) { wp.order = i + 1; });
+  }
+  function removeWaypoint(id) {
+    state.waypoints = state.waypoints.filter(function (wp) { return wp.id !== id; });
+    renumber();
+    renderScan();
+  }
+  function moveWaypoint(id, dir) {
+    var idx = state.waypoints.findIndex(function (wp) { return wp.id === id; });
+    var newIdx = idx + dir;
+    if (idx < 0 || newIdx < 0 || newIdx >= state.waypoints.length) return;
+    var tmp = state.waypoints[idx];
+    state.waypoints[idx] = state.waypoints[newIdx];
+    state.waypoints[newIdx] = tmp;
+    renumber();
+    renderScan();
+  }
+
+  function renderScan() {
+    scanList.innerHTML = "";
+    state.waypoints.forEach(function (wp) {
+      var card = document.createElement("div");
+      card.className = "wpCard";
+
+      var img = document.createElement("img");
+      img.src = wp.photo_base64;
+      img.alt = "Waypoint " + wp.order + " photo";
+      card.appendChild(img);
+
+      var body = document.createElement("div");
+      body.className = "body";
+      var orderEl = document.createElement("div"); orderEl.className = "order"; orderEl.textContent = "#" + wp.order;
+      var labelEl = document.createElement("div"); labelEl.className = "label"; labelEl.textContent = wp.label;
+      body.appendChild(orderEl); body.appendChild(labelEl);
+      card.appendChild(body);
+
+      var ctrls = document.createElement("div");
+      ctrls.className = "ctrls";
+      var upBtn = mkSmallBtn("↑", function () { moveWaypoint(wp.id, -1); });
+      var downBtn = mkSmallBtn("↓", function () { moveWaypoint(wp.id, 1); });
+      var delBtn = mkSmallBtn("✕", function () { removeWaypoint(wp.id); }, "danger");
+      ctrls.appendChild(upBtn); ctrls.appendChild(downBtn); ctrls.appendChild(delBtn);
+      card.appendChild(ctrls);
+
+      scanList.appendChild(card);
+    });
+    toFormBtn.disabled = state.waypoints.length === 0;
+  }
+  function mkSmallBtn(text, onClick, kind) {
+    var b = document.createElement("button");
+    b.className = "btn small" + (kind ? " " + kind : " ghost");
+    b.textContent = text;
+    b.addEventListener("click", onClick);
+    return b;
+  }
+
+  capturePhotoBtn.addEventListener("click", function () { camInput.value = ""; camInput.click(); });
+  camInput.addEventListener("change", function () {
+    var f = camInput.files && camInput.files[0];
+    if (!f) return;
+    var img = new Image();
+    var url = URL.createObjectURL(f);
+    img.onload = function () {
+      try {
+        var canvas = document.createElement("canvas");
+        var MAX = 1024;
+        var scale = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight));
+        canvas.width = Math.round(img.naturalWidth * scale);
+        canvas.height = Math.round(img.naturalHeight * scale);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        addWaypoint(canvas.toDataURL("image/jpeg", 0.8), "Waypoint " + (state.waypoints.length + 1));
+      } catch (e) { showToast("Could not read photo: " + e.message); }
+      finally { URL.revokeObjectURL(url); }
+    };
+    img.onerror = function () { URL.revokeObjectURL(url); showToast("Could not load the selected photo."); };
+    img.src = url;
+  });
+  addMockPhotoBtn.addEventListener("click", function () {
+    var n = state.waypoints.length + 1;
+    addWaypoint(makeMockPhoto("Waypoint " + n, n), "Waypoint " + n);
+  });
+  addMockRouteBtn.addEventListener("click", function () {
+    MOCK_ROUTE.forEach(function (wp, i) {
+      var n = state.waypoints.length + 1;
+      addWaypoint(makeMockPhoto(wp.label, n), wp.label);
+    });
+    showToast("Added 4 mock waypoints. Go to Form to see mock notes too.", "success");
+  });
+
+  /* =============================== FORM STEP =============================== */
+  function renderForm() {
+    formList.innerHTML = "";
+    state.waypoints.forEach(function (wp, i) {
+      var card = document.createElement("div");
+      card.className = "card";
+
+      var h = document.createElement("h2");
+      h.textContent = "#" + wp.order + " — " + wp.label;
+      card.appendChild(h);
+
+      var thumb = document.createElement("img");
+      thumb.src = wp.photo_base64;
+      thumb.style.cssText = "width:100%;max-width:220px;border-radius:8px;margin-bottom:10px;display:block;";
+      card.appendChild(thumb);
+
+      appendFieldTextInput(card, "Label", wp.label, function (v) { wp.label = v; h.textContent = "#" + wp.order + " — " + wp.label; });
+      appendFieldTextarea(card, "Notes" + (i === state.waypoints.length - 1 ? " (spoken on arrival if this is the destination)" : ""), wp.notes, function (v) { wp.notes = v; });
+      appendFieldTextarea(card, "Transition from previous waypoint", wp.transition_from_previous, function (v) { wp.transition_from_previous = v; }, i === 0);
+
+      if (i === 0) {
+        var hint = document.createElement("div");
+        hint.className = "hint";
+        hint.textContent = "First waypoint — no previous transition needed.";
+        card.appendChild(hint);
+      }
+
+      var mockBtn = document.createElement("button");
+      mockBtn.className = "btn ghost small";
+      mockBtn.textContent = "🧪 Fill this card with mock text";
+      mockBtn.addEventListener("click", function () { fillMockText(wp, i); renderForm(); });
+      card.appendChild(mockBtn);
+
+      formList.appendChild(card);
+    });
+    toReviewBtn.disabled = state.waypoints.length === 0;
+  }
+  function appendFieldTextInput(parent, labelText, value, onInput) {
+    var lab = document.createElement("label"); lab.textContent = labelText;
+    var inp = document.createElement("input"); inp.type = "text"; inp.value = value || "";
+    inp.addEventListener("input", function () { onInput(inp.value); });
+    parent.appendChild(lab); parent.appendChild(inp);
+  }
+  function appendFieldTextarea(parent, labelText, value, onInput, disabled) {
+    var lab = document.createElement("label"); lab.textContent = labelText;
+    var ta = document.createElement("textarea"); ta.value = value || "";
+    if (disabled) ta.disabled = true;
+    ta.addEventListener("input", function () { onInput(ta.value); });
+    parent.appendChild(lab); parent.appendChild(ta);
+  }
+  function fillMockText(wp, i) {
+    var mock = MOCK_ROUTE[i % MOCK_ROUTE.length];
+    if (!wp.label || /^Waypoint \d+$/.test(wp.label)) wp.label = mock.label;
+    wp.notes = mock.notes;
+    wp.transition_from_previous = i === 0 ? "" : mock.transition;
+  }
+  fillAllMockBtn.addEventListener("click", function () {
+    if (!locationName.value.trim()) locationName.value = "Demo Home — Ground Floor";
+    state.waypoints.forEach(fillMockText);
+    renderForm();
+    showToast("Filled mock text for all waypoints.", "success");
+  });
+
+  /* =============================== REVIEW STEP =============================== */
+  function buildMapObject() {
+    return {
+      map_version: 1,
+      location_name: locationName.value.trim() || "Untitled location",
+      waypoints: state.waypoints.map(function (wp) {
+        return {
+          id: wp.id,
+          order: wp.order,
+          label: wp.label,
+          notes: wp.notes,
+          transition_from_previous: wp.transition_from_previous,
+          photo_base64: wp.photo_base64
+        };
+      })
+    };
+  }
+  function renderReview() {
+    var warnings = [];
+    if (!locationName.value.trim()) warnings.push("Location name is empty.");
+    state.waypoints.forEach(function (wp) {
+      if (!wp.label.trim()) warnings.push("Waypoint #" + wp.order + " has no label.");
+      if (!wp.notes.trim()) warnings.push("Waypoint #" + wp.order + " (\"" + wp.label + "\") has no notes.");
+      if (wp.order > 1 && !wp.transition_from_previous.trim()) warnings.push("Waypoint #" + wp.order + " (\"" + wp.label + "\") has no transition text.");
+    });
+    reviewWarnings.innerHTML = "";
+    if (warnings.length) {
+      var w = document.createElement("div");
+      w.className = "warn";
+      w.textContent = "⚠ " + warnings.length + " issue(s) found (you can still publish): " + warnings.join(" · ");
+      reviewWarnings.appendChild(w);
+    } else {
+      var ok = document.createElement("div");
+      ok.className = "ok";
+      ok.textContent = "✓ Looks complete — every waypoint has a label, notes, and a transition.";
+      reviewWarnings.appendChild(ok);
+    }
+
+    reviewSummary.textContent = (locationName.value.trim() || "Untitled location") + " — " + state.waypoints.length + " waypoint(s).";
+
+    reviewList.innerHTML = "";
+    state.waypoints.forEach(function (wp) {
+      var card = document.createElement("div");
+      card.className = "wpCard";
+      var img = document.createElement("img"); img.src = wp.photo_base64;
+      card.appendChild(img);
+      var body = document.createElement("div"); body.className = "body";
+      var order = document.createElement("div"); order.className = "order"; order.textContent = "#" + wp.order;
+      var label = document.createElement("div"); label.className = "label"; label.textContent = wp.label;
+      var notes = document.createElement("div"); notes.className = "notes"; notes.textContent = "Notes: " + (wp.notes || "(none)");
+      var trans = document.createElement("div"); trans.className = "transition"; trans.textContent = "Transition: " + (wp.transition_from_previous || "(none)");
+      body.appendChild(order); body.appendChild(label); body.appendChild(notes); body.appendChild(trans);
+      card.appendChild(body);
+      reviewList.appendChild(card);
+    });
+
+    jsonPreview.textContent = JSON.stringify(buildMapObject(), null, 2);
+    toPublishBtn.disabled = state.waypoints.length === 0;
+  }
+  togglePreviewBtn.addEventListener("click", function () {
+    jsonPreview.style.display = jsonPreview.style.display === "block" ? "none" : "block";
+  });
+
+  /* =============================== PUBLISH STEP =============================== */
+  function getSavedMaps() {
+    try {
+      var raw = localStorage.getItem(LS_KEY_MAPS);
+      if (!raw) return [];
+      var arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) { return []; }
+  }
+  function renderPublish() {
+    var saved = getSavedMaps();
+    savedMapsInfo.textContent = saved.length
+      ? saved.length + " map(s) currently saved in this browser: " + saved.map(function (m) { return m.location_name; }).join(", ")
+      : "No maps saved in this browser yet.";
+  }
+  saveLocalBtn.addEventListener("click", function () {
+    try {
+      var maps = getSavedMaps();
+      maps.push(buildMapObject());
+      localStorage.setItem(LS_KEY_MAPS, JSON.stringify(maps));
+      publishResult.innerHTML = "";
+      var ok = document.createElement("div");
+      ok.className = "ok";
+      ok.textContent = "✓ Saved. PathGuide's \"Load from PathMapper\" will now find this route.";
+      publishResult.appendChild(ok);
+      nextStepsCard.style.display = "block";
+      renderPublish();
+      showToast("Map saved to this browser.", "success");
+    } catch (e) {
+      showToast("Could not save (storage may be full/blocked): " + e.message);
+    }
+  });
+  downloadJsonBtn.addEventListener("click", function () {
+    try {
+      var blob = new Blob([JSON.stringify(buildMapObject(), null, 2)], { type: "application/json" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = (locationName.value.trim() || "map").replace(/[^a-z0-9\-_]+/gi, "_").toLowerCase() + ".json";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+    } catch (e) { showToast("Download failed: " + e.message); }
+  });
+  copyJsonBtn.addEventListener("click", function () {
+    var text = JSON.stringify(buildMapObject(), null, 2);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { showToast("JSON copied to clipboard.", "success"); })
+        .catch(function () { showToast("Copy failed — select and copy the JSON manually from Review."); });
+    } else {
+      showToast("Clipboard API unavailable — use Download instead.");
+    }
+  });
+  startNewBtn.addEventListener("click", function () {
+    state.waypoints = [];
+    locationName.value = "";
+    nextStepsCard.style.display = "none";
+    publishResult.innerHTML = "";
+    goToStep(1);
+    renderScan();
+    showToast("Started a new map.", "info");
+  });
+  clearAllMapsBtn.addEventListener("click", function () {
+    try {
+      localStorage.removeItem(LS_KEY_MAPS);
+      renderPublish();
+      showToast("Cleared all saved maps from this browser.", "info");
+    } catch (e) { showToast("Could not clear: " + e.message); }
+  });
+
+  /* =============================== QUICK DEMO =============================== */
+  quickDemoBtn.addEventListener("click", function () {
+    state.waypoints = [];
+    locationName.value = "Demo Home — Ground Floor";
+    MOCK_ROUTE.forEach(function (wp, i) {
+      var n = i + 1;
+      addWaypoint(makeMockPhoto(wp.label, n), wp.label);
+    });
+    state.waypoints.forEach(fillMockText);
+    goToStep(3);
+    showToast("Quick demo route loaded — review below, then Publish.", "success");
+  });
+
+  /* =============================== SAFETY NETS =============================== */
+  window.addEventListener("error", function (ev) { showToast("Error: " + (ev.message || "unknown")); });
+  window.addEventListener("unhandledrejection", function (ev) {
+    var msg = (ev.reason && ev.reason.message) ? ev.reason.message : "unknown";
+    showToast("Error: " + msg);
+  });
+
+  renderScan();
+  renderPublish();
+})();
+</script>
+</body>
+</html>
