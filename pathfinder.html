@@ -42,6 +42,7 @@
   .btn.big { font-size: 19px; padding: 16px; }
   .btn.ghost { background: transparent; border: 1px solid #444; color: #ccc; }
   .btn.small { padding: 7px 10px; font-size: 12px; }
+  .btn.recording { background: #b3261e; border-color: #b3261e; color: #fff; animation: pulse 0.9s infinite; }
   .toggleRow { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
   .toggleRow span { font-size: 14px; color: #ddd; padding-right: 10px; }
   .switch { position: relative; width: 52px; height: 30px; flex: none; }
@@ -139,10 +140,23 @@
       <button class="chip" data-obj="phone">phone</button>
       <button class="chip" data-obj="red chair">red chair</button>
     </div>
+    <div class="row" style="margin-top:10px;">
+      <button class="btn ghost block" id="micBtn" type="button">🎤 Speak object name</button>
+    </div>
+    <div class="hint" id="micStatus"></div>
   </div>
 
   <div class="card">
-    <h2>2. Demo options</h2>
+    <h2>2. Voice</h2>
+    <div class="toggleRow">
+      <span>Use ElevenLabs voice (premium quality, speaks &amp; listens)</span>
+      <label class="switch"><input type="checkbox" id="elVoiceToggle" checked><span class="slider"></span></label>
+    </div>
+    <div class="hint">Needs ELEVENLABS_API_KEY set in Netlify. Speaking output falls back automatically to the device's built-in voice if unavailable — "Speak object name" above needs the key regardless.</div>
+  </div>
+
+  <div class="card">
+    <h2>3. Demo options</h2>
     <div class="toggleRow">
       <span>Practice mode (no API — canned responses)</span>
       <label class="switch"><input type="checkbox" id="practiceToggle"><span class="slider"></span></label>
@@ -245,6 +259,7 @@
   function $(id) { return document.getElementById(id); }
   var setupScreen = $("setupScreen"), sweepScreen = $("sweepScreen"), guideScreen = $("guideScreen");
   var objectInput = $("objectInput"), practiceToggle = $("practiceToggle"), startBtn = $("startBtn");
+  var micBtn = $("micBtn"), micStatus = $("micStatus"), elVoiceToggle = $("elVoiceToggle");
   var sweepTap = $("sweepTap"), sweepStatus = $("sweepStatus"), sweepInstruction = $("sweepInstruction");
   var slotGrid = $("slotGrid"), mockPresentBtn = $("mockPresentBtn"), mockAbsentBtn = $("mockAbsentBtn"),
       clearSlotsBtn = $("clearSlotsBtn"), searchNowBtn = $("searchNowBtn"), backToSetupBtn = $("backToSetupBtn");
@@ -310,7 +325,7 @@
     beep(440, 0.00, 0.25, 0.22);
     beep(330, 0.28, 0.45, 0.22);
   }
-  function speak(text) {
+  function speakBrowser(text) {
     try {
       if (!("speechSynthesis" in window)) return;
       window.speechSynthesis.cancel();
@@ -319,6 +334,140 @@
       window.speechSynthesis.speak(u);
     } catch (e) { /* ignore */ }
   }
+
+  /* ElevenLabs playback via the serverless proxy — key never reaches the browser. */
+  var currentAudio = null;
+  function speakEL(text) {
+    return fetch("/.netlify/functions/elevenlabs-tts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: text })
+    }).then(function (res) {
+      return res.text().then(function (txt) {
+        if (!res.ok) {
+          var msg = "TTS error " + res.status;
+          try { var j = JSON.parse(txt); if (j.error && j.error.message) msg = j.error.message; } catch (e) { /* ignore */ }
+          throw new Error(msg);
+        }
+        return JSON.parse(txt);
+      });
+    }).then(function (data) {
+      return new Promise(function (resolve, reject) {
+        try {
+          if (currentAudio) { currentAudio.pause(); }
+          var audio = new Audio("data:" + (data.mime_type || "audio/mpeg") + ";base64," + data.audio_base64);
+          currentAudio = audio;
+          audio.onended = resolve;
+          audio.onerror = function () { reject(new Error("Playback failed.")); };
+          audio.play().catch(reject);
+        } catch (e) { reject(e); }
+      });
+    });
+  }
+
+  /* Public dispatcher: ElevenLabs when the toggle is on, always falling back to the
+     device's built-in voice on any failure so speech never just goes silent. */
+  function speak(text) {
+    if (elVoiceToggle && elVoiceToggle.checked) {
+      speakEL(text).catch(function (e) {
+        logExchange({ phase: "tts", error: e.message });
+        speakBrowser(text);
+      });
+    } else {
+      speakBrowser(text);
+    }
+  }
+
+  /* =============================== VOICE INPUT (object name) =============================== */
+  var mediaRecorder = null, recordedChunks = [], recordTimer = null, isRecording = false;
+  function startRecording() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === "undefined") {
+      showToast("Microphone unavailable on this browser — please type instead.");
+      return;
+    }
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      recordedChunks = [];
+      var options = {};
+      try {
+        if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) options.mimeType = "audio/webm;codecs=opus";
+        else if (MediaRecorder.isTypeSupported("audio/webm")) options.mimeType = "audio/webm";
+      } catch (e) { /* ignore */ }
+      try {
+        mediaRecorder = new MediaRecorder(stream, options);
+      } catch (e) {
+        showToast("Could not start recording: " + e.message);
+        try { stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e2) { /* ignore */ }
+        return;
+      }
+      mediaRecorder.ondataavailable = function (ev) { if (ev.data && ev.data.size) recordedChunks.push(ev.data); };
+      mediaRecorder.onstop = function () {
+        try { stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) { /* ignore */ }
+        finishRecording();
+      };
+      mediaRecorder.start();
+      isRecording = true;
+      micBtn.textContent = "🎤 Listening… tap to stop";
+      micBtn.classList.add("recording");
+      micStatus.textContent = "Listening (auto-stops in 6s)…";
+      ensureAudio();
+      beep(660, 0, 0.08, 0.12);
+      recordTimer = setTimeout(function () { stopRecording(); }, 6000);
+    }).catch(function () {
+      showToast("Microphone permission denied — please type instead.");
+    });
+  }
+  function stopRecording() {
+    if (recordTimer) { clearTimeout(recordTimer); recordTimer = null; }
+    if (mediaRecorder && isRecording) {
+      isRecording = false;
+      beep(440, 0, 0.08, 0.12);
+      micBtn.textContent = "🎤 Speak object name";
+      micBtn.classList.remove("recording");
+      try { mediaRecorder.stop(); } catch (e) { /* ignore */ }
+    }
+  }
+  function finishRecording() {
+    if (!recordedChunks.length) {
+      micStatus.textContent = "";
+      showToast("No audio captured — please try again or type instead.");
+      return;
+    }
+    var blob = new Blob(recordedChunks, { type: (mediaRecorder && mediaRecorder.mimeType) || "audio/webm" });
+    micStatus.textContent = "Transcribing…";
+    var reader = new FileReader();
+    reader.onload = function () {
+      var b64 = String(reader.result).split(",")[1] || "";
+      fetch("/.netlify/functions/elevenlabs-stt", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ audio_base64: b64, mime_type: blob.type })
+      }).then(function (res) {
+        return res.text().then(function (txt) {
+          if (!res.ok) {
+            var msg = "STT error " + res.status;
+            try { var j = JSON.parse(txt); if (j.error && j.error.message) msg = j.error.message; } catch (e) { /* ignore */ }
+            throw new Error(msg);
+          }
+          return JSON.parse(txt);
+        });
+      }).then(function (data) {
+        var heard = (data.text || "").trim();
+        micStatus.textContent = "";
+        if (!heard) { showToast("Didn't catch that — please try again or type instead."); return; }
+        objectInput.value = heard;
+        speak("I heard: " + heard);
+      }).catch(function (e) {
+        micStatus.textContent = "";
+        showToast("Voice input failed: " + e.message + " — please type instead.");
+      });
+    };
+    reader.onerror = function () { micStatus.textContent = ""; showToast("Could not process the recording."); };
+    reader.readAsDataURL(blob);
+  }
+  micBtn.addEventListener("click", function () {
+    ensureAudio();
+    if (isRecording) stopRecording(); else startRecording();
+  });
 
   /* =============================== CAMERA / PHOTOS =============================== */
   function startCamera() {

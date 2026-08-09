@@ -33,6 +33,7 @@ Both HTML files are single-file apps — all CSS and JS are inline, no build ste
 2. Create a new site on [Netlify](https://www.netlify.com/) and connect it to your repo (or drag-and-drop deploy).
 3. In **Site settings → Environment variables**, add:
    - `ANTHROPIC_API_KEY` = your Claude API key
+   - `ELEVENLABS_API_KEY` = your ElevenLabs API key (optional — powers premium voice input/output in PathFinder; `ELEVENLABS_VOICE_ID` and `ELEVENLABS_MODEL_ID` are optional overrides, both default to sensible stock values if unset)
 4. Deploy. Netlify will pick up `netlify.toml` automatically (publishes the repo root, functions live in `netlify/functions`).
 5. Open the deployed site — this serves `pathguide.html`, which calls `/.netlify/functions/claude-proxy` for all Claude requests.
 
