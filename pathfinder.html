@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#000000">
+<title>PathFinder</title>
+<style>
+  /* ============ PathFinder — 360° object search + guidance for blind users ============
+     Sweep: 4 photos (front/right/back/left) → Claude says if the object exists & where.
+     Guide: giant-button loop (tap → photo → spoken step) until the object is reached.
+     Every step has a mock so the whole flow can be demoed with no camera and no API. */
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; background: #000; color: #fff; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+  body { overflow: hidden; }
+
+  .screen { position: fixed; inset: 0; display: none; flex-direction: column; }
+  .screen.active { display: flex; }
+
+  /* ---------- Setup ---------- */
+  #setupScreen { overflow-y: auto; display: none; padding: 16px; background: #111; }
+  #setupScreen.active { display: block; }
+  h1 { font-size: 26px; color: #ffd400; }
+  .sub { color: #999; font-size: 13px; margin: 2px 0 16px; }
+  .card { background: #1c1c1e; border: 1px solid #333; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+  .card h2 { font-size: 15px; color: #ffd400; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  label { display: block; font-size: 13px; color: #bbb; margin: 10px 0 4px; }
+  input[type="text"] {
+    width: 100%; background: #000; color: #fff; border: 1px solid #444; border-radius: 8px;
+    padding: 10px; font-size: 16px;
+  }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .chip { background: #2c2c2e; border: 1px solid #444; color: #ddd; border-radius: 20px; padding: 6px 12px; font-size: 13px; cursor: pointer; }
+  .chip:active { background: #3a3a3c; }
+  .btn {
+    display: inline-block; padding: 11px 16px; border: none; border-radius: 10px;
+    background: #333; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .btn.primary { background: #ffd400; color: #000; }
+  .btn.primary:disabled { background: #555; color: #999; }
+  .btn.block { display: block; width: 100%; text-align: center; }
+  .btn.big { font-size: 19px; padding: 16px; }
+  .btn.ghost { background: transparent; border: 1px solid #444; color: #ccc; }
+  .btn.small { padding: 7px 10px; font-size: 12px; }
+  .toggleRow { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+  .toggleRow span { font-size: 14px; color: #ddd; padding-right: 10px; }
+  .switch { position: relative; width: 52px; height: 30px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider { position: absolute; inset: 0; background: #444; border-radius: 30px; transition: 0.2s; }
+  .slider::before { content: ""; position: absolute; height: 24px; width: 24px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: 0.2s; }
+  .switch input:checked + .slider { background: #ffd400; }
+  .switch input:checked + .slider::before { transform: translateX(22px); }
+  .hint { font-size: 12px; color: #777; margin-top: 6px; line-height: 1.4; }
+  a.applink { color: #ffd400; font-size: 13px; }
+
+  /* ---------- Sweep ---------- */
+  #sweepScreen { background: #000; }
+  #sweepTap {
+    flex: 1; border: none; background: #000; color: #fff; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 20px; text-align: center; min-height: 0;
+  }
+  #sweepTap:disabled { cursor: wait; }
+  #sweepTap.thinking { background: #1a1400; }
+  #sweepStatus { font-size: 17px; font-weight: 800; color: #ffd400; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+  #sweepInstruction { font-size: 27px; font-weight: 800; line-height: 1.25; }
+  #sweepHelper { flex: none; background: #111; border-top: 1px solid #2c2c2e; padding: 10px 12px 14px; max-height: 46vh; overflow-y: auto; }
+  #sweepHelper h3 { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .slotGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 10px; }
+  .slot { text-align: center; }
+  .slot img, .slot .ph {
+    width: 100%; aspect-ratio: 4/3; object-fit: cover; border-radius: 8px; background: #1c1c1e;
+    border: 1px solid #333; display: flex; align-items: center; justify-content: center; color: #555; font-size: 11px;
+  }
+  .slot .dir { font-size: 11px; color: #999; margin: 4px 0 2px; text-transform: uppercase; font-weight: 700; }
+  .slot .btn { width: 100%; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .row .btn { flex: 1; white-space: nowrap; }
+
+  /* ---------- Guide ---------- */
+  #guideScreen { background: #000; }
+  #guideTap {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    background: #000; border: none; color: #fff; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 24px; text-align: center;
+  }
+  #guideTap:disabled { cursor: wait; }
+  #guideTap.thinking { background: #1a1400; }
+  #guideStatus { font-size: 24px; font-weight: 800; color: #ffd400; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; }
+  #guideHazard { font-size: 21px; font-weight: 800; color: #ff453a; margin-bottom: 12px; display: none; }
+  #guideInstruction { font-size: 32px; font-weight: 800; line-height: 1.25; }
+  #guideTarget { position: absolute; top: 12px; left: 0; right: 0; text-align: center; font-size: 14px; color: #888; pointer-events: none; }
+  #guideModeBadge { position: absolute; top: 34px; left: 0; right: 0; text-align: center; font-size: 12px; color: #ff9f0a; pointer-events: none; display: none; }
+  .cornerLink {
+    position: absolute; bottom: 8px; font-size: 11px; color: #333;
+    background: none; border: none; padding: 8px; z-index: 5; cursor: pointer;
+  }
+  #newSearchLink { left: 12px; }
+  #guideDebugLink { right: 12px; }
+
+  #debugPanel {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.96); z-index: 50; display: none;
+    flex-direction: column; padding: 14px; color: #ccc;
+  }
+  #debugPanel.open { display: flex; }
+  #debugPanel h3 { color: #ffd400; font-size: 15px; margin-bottom: 8px; }
+  #debugLog { flex: 1; overflow-y: auto; background: #111; border: 1px solid #333; border-radius: 8px; padding: 10px; font-family: monospace; font-size: 11px; white-space: pre-wrap; word-break: break-word; }
+  #debugPanel .btn { margin-top: 8px; }
+
+  #camVideo { position: absolute; width: 2px; height: 2px; opacity: 0.01; pointer-events: none; left: -10px; top: -10px; }
+  .hiddenFile { display: none; }
+
+  #toast {
+    position: fixed; top: 14px; left: 12px; right: 12px; z-index: 100;
+    background: #b3261e; color: #fff; padding: 12px 14px; border-radius: 10px;
+    font-size: 14px; font-weight: 600; display: none; text-align: center;
+  }
+  #toast.info { background: #2c2c2e; }
+  #toast.success { background: #10331a; border: 1px solid #4cd964; }
+
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .thinking #sweepStatus, .thinking #guideStatus { animation: pulse 0.9s infinite; }
+</style>
+</head>
+<body>
+
+<!-- ======================= SETUP ======================= -->
+<div id="setupScreen" class="screen active">
+  <h1>PathFinder</h1>
+  <div class="sub">Find an object with a 360° photo sweep, then get guided to it. Companion to <a class="applink" href="./pathguide.html">PathGuide</a> / <a class="applink" href="./pathmapper.html">PathMapper</a>.</div>
+
+  <div class="card">
+    <h2>1. What are you looking for?</h2>
+    <input type="text" id="objectInput" placeholder="e.g. orange bag" value="orange bag">
+    <div class="chips">
+      <button class="chip" data-obj="orange bag">orange bag</button>
+      <button class="chip" data-obj="water bottle">water bottle</button>
+      <button class="chip" data-obj="phone">phone</button>
+      <button class="chip" data-obj="red chair">red chair</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2. Demo options</h2>
+    <div class="toggleRow">
+      <span>Practice mode (no API — canned responses)</span>
+      <label class="switch"><input type="checkbox" id="practiceToggle"><span class="slider"></span></label>
+    </div>
+    <div class="hint">Live mode calls Claude through this site's serverless proxy (needs the deployed site + ANTHROPIC_API_KEY set in Netlify). Practice mode works fully offline — perfect demo insurance.</div>
+  </div>
+
+  <button class="btn primary block big" id="startBtn">Start 360° Search</button>
+  <div class="hint" style="margin-top:10px;">Blind-user flow after start: the app speaks which way to face; each tap captures one of the 4 directions (front → right → back → left), and the final tap runs the search. A sighted helper can instead upload 4 photos or load a mock set from the panel at the bottom.</div>
+</div>
+
+<!-- ======================= SWEEP ======================= -->
+<div id="sweepScreen" class="screen">
+  <button id="sweepTap">
+    <div id="sweepStatus">360° sweep</div>
+    <div id="sweepInstruction">Face forward, then tap.</div>
+  </button>
+
+  <div id="sweepHelper">
+    <h3>Helper panel — uploads &amp; mocks (sighted helper / judges)</h3>
+    <div class="slotGrid" id="slotGrid">
+      <!-- slots injected -->
+    </div>
+    <div class="row">
+      <button class="btn ghost small" id="mockPresentBtn">🧪 Mock set — object on LEFT</button>
+      <button class="btn ghost small" id="mockAbsentBtn">🧪 Mock set — object absent</button>
+    </div>
+    <div class="row" style="margin-top:6px;">
+      <button class="btn ghost small" id="clearSlotsBtn">Clear photos</button>
+      <button class="btn primary small" id="searchNowBtn" disabled>🔍 Search now</button>
+      <button class="btn ghost small" id="backToSetupBtn">← Setup</button>
+    </div>
+  </div>
+
+  <video id="camVideo" autoplay playsinline muted></video>
+</div>
+
+<!-- ======================= GUIDE ======================= -->
+<div id="guideScreen" class="screen">
+  <button id="guideTap">
+    <div id="guideStatus">Tap for next step</div>
+    <div id="guideHazard"></div>
+    <div id="guideInstruction"></div>
+  </button>
+  <div id="guideTarget"></div>
+  <div id="guideModeBadge"></div>
+  <button class="cornerLink" id="newSearchLink">new search</button>
+  <button class="cornerLink" id="guideDebugLink">debug</button>
+</div>
+
+<!-- ======================= DEBUG ======================= -->
+<div id="debugPanel">
+  <h3>PathFinder session log (team only)</h3>
+  <div id="debugLog"></div>
+  <button class="btn small" id="debugCloseBtn">Close</button>
+</div>
+
+<div id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var DIRECTIONS = ["front", "right", "back", "left"];
+  var TURN_PROMPTS = {
+    front: "Face forward, then tap.",
+    right: "Turn 90 degrees to your right, then tap.",
+    back: "Turn 90 degrees to your right again, then tap.",
+    left: "Turn 90 degrees to your right once more, then tap."
+  };
+
+  var state = {
+    object: "orange bag",
+    practiceMode: false,
+    photos: { front: null, right: null, back: null, left: null },
+    sweepIdx: 0,             // next direction slot to capture in the guided flow
+    phase: "setup",          // setup | sweep | guide
+    found: null,             // sweep result {found, direction, location_detail, confidence}
+    prevInstruction: "None yet — this is the first guidance request.",
+    reachedDone: false,
+    busy: false,
+    mockScenario: null,      // 'present' | 'absent' — which canned sweep to replay
+    practiceGuideIdx: 0,
+    sessionLog: [],
+    cameraStream: null,
+    cameraOk: false
+  };
+
+  /* Canned responses (practice mode / demo insurance) */
+  var PRACTICE_SWEEP_FOUND = { found: true, direction: "left", location_detail: "An orange bag is on a shelf at waist height.", confidence: "high" };
+  var PRACTICE_SWEEP_ABSENT = { found: false, direction: null, location_detail: "No matching object is visible in any direction.", confidence: "high" };
+  var PRACTICE_GUIDE = [
+    { instruction: "Turn left until your shoulders face the shelf, then stop.", hazard: null, reached: false, confidence: "high" },
+    { instruction: "Take four small steps forward.", hazard: null, reached: false, confidence: "high" },
+    { instruction: "A low stool is ahead, step slightly right, then two small steps.", hazard: "Low stool directly ahead", reached: false, confidence: "high" },
+    { instruction: "Reach forward at waist height. The bag is in front of you.", hazard: null, reached: true, confidence: "high" }
+  ];
+
+  /* =============================== DOM =============================== */
+  function $(id) { return document.getElementById(id); }
+  var setupScreen = $("setupScreen"), sweepScreen = $("sweepScreen"), guideScreen = $("guideScreen");
+  var objectInput = $("objectInput"), practiceToggle = $("practiceToggle"), startBtn = $("startBtn");
+  var sweepTap = $("sweepTap"), sweepStatus = $("sweepStatus"), sweepInstruction = $("sweepInstruction");
+  var slotGrid = $("slotGrid"), mockPresentBtn = $("mockPresentBtn"), mockAbsentBtn = $("mockAbsentBtn"),
+      clearSlotsBtn = $("clearSlotsBtn"), searchNowBtn = $("searchNowBtn"), backToSetupBtn = $("backToSetupBtn");
+  var guideTap = $("guideTap"), guideStatus = $("guideStatus"), guideHazard = $("guideHazard"),
+      guideInstruction = $("guideInstruction"), guideTarget = $("guideTarget"), guideModeBadge = $("guideModeBadge");
+  var newSearchLink = $("newSearchLink"), guideDebugLink = $("guideDebugLink");
+  var debugPanel = $("debugPanel"), debugLog = $("debugLog"), debugCloseBtn = $("debugCloseBtn");
+  var camVideo = $("camVideo"), toast = $("toast");
+
+  /* =============================== TOAST / LOG =============================== */
+  var toastTimer = null;
+  function showToast(msg, kind) {
+    try {
+      toast.textContent = msg;
+      toast.className = kind || "";
+      toast.style.display = "block";
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(function () { toast.style.display = "none"; }, 4500);
+    } catch (e) { /* never crash on UI */ }
+  }
+  function logExchange(entry) {
+    try { entry.time = new Date().toISOString(); state.sessionLog.push(entry); } catch (e) { /* ignore */ }
+  }
+
+  /* =============================== AUDIO / SPEECH =============================== */
+  var audioCtx = null;
+  function ensureAudio() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === "suspended") audioCtx.resume();
+    } catch (e) { audioCtx = null; }
+    return audioCtx;
+  }
+  function beep(freq, startDelay, duration, gainVal) {
+    var ctx = ensureAudio();
+    if (!ctx) return;
+    try {
+      var osc = ctx.createOscillator(), g = ctx.createGain();
+      osc.type = "sine"; osc.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, ctx.currentTime + startDelay);
+      g.gain.exponentialRampToValueAtTime(gainVal, ctx.currentTime + startDelay + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + startDelay + duration);
+      osc.connect(g); g.connect(ctx.destination);
+      osc.start(ctx.currentTime + startDelay);
+      osc.stop(ctx.currentTime + startDelay + duration + 0.05);
+    } catch (e) { /* ignore */ }
+  }
+  var tickTimer = null;
+  function startTicking() {
+    stopTicking();
+    beep(880, 0, 0.06, 0.08);
+    tickTimer = setInterval(function () { beep(880, 0, 0.06, 0.08); }, 550);
+  }
+  function stopTicking() { if (tickTimer) { clearInterval(tickTimer); tickTimer = null; } }
+  function playSuccessTone() {
+    beep(523.25, 0.00, 0.18, 0.25);
+    beep(659.25, 0.18, 0.18, 0.25);
+    beep(783.99, 0.36, 0.18, 0.25);
+    beep(1046.5, 0.54, 0.45, 0.3);
+  }
+  function playNotFoundTone() {
+    /* falling minor pair — clearly different from success */
+    beep(440, 0.00, 0.25, 0.22);
+    beep(330, 0.28, 0.45, 0.22);
+  }
+  function speak(text) {
+    try {
+      if (!("speechSynthesis" in window)) return;
+      window.speechSynthesis.cancel();
+      var u = new SpeechSynthesisUtterance(text);
+      u.rate = 0.95; u.lang = "en-US";
+      window.speechSynthesis.speak(u);
+    } catch (e) { /* ignore */ }
+  }
+
+  /* =============================== CAMERA / PHOTOS =============================== */
+  function startCamera() {
+    state.cameraOk = false;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return Promise.resolve();
+    return navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    }).then(function (stream) {
+      state.cameraStream = stream;
+      camVideo.srcObject = stream;
+      return camVideo.play().catch(function () { /* ignore */ });
+    }).then(function () { state.cameraOk = true; })
+      .catch(function () {
+        state.cameraOk = false;
+        showToast("Camera unavailable — use the helper panel to upload photos or load a mock set.", "info");
+      });
+  }
+  function stopCamera() {
+    try { if (state.cameraStream) state.cameraStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) { /* ignore */ }
+    state.cameraStream = null; state.cameraOk = false;
+  }
+  function frameToDataUrl(source, w, h) {
+    var MAX = 1024;
+    var scale = Math.min(1, MAX / Math.max(w, h));
+    var canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(w * scale));
+    canvas.height = Math.max(1, Math.round(h * scale));
+    canvas.getContext("2d").drawImage(source, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.7);
+  }
+  function captureFrame() {
+    if (state.cameraOk && camVideo.videoWidth > 0) {
+      return frameToDataUrl(camVideo, camVideo.videoWidth, camVideo.videoHeight);
+    }
+    return null;
+  }
+
+  /* =============================== MOCK 360° SCENES =============================== */
+  /* Draws simple but semantically-real room views. The 'left' view of the 'present'
+     set contains an actual drawn orange bag — so a LIVE Claude call on the mock set
+     genuinely finds it, not just practice mode. */
+  function drawRoomBase(ctx, w, h, hue) {
+    var grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, "hsl(" + hue + ", 25%, 42%)");
+    grad.addColorStop(0.62, "hsl(" + hue + ", 25%, 30%)");
+    grad.addColorStop(0.62, "hsl(30, 22%, 34%)");   /* floor */
+    grad.addColorStop(1, "hsl(30, 22%, 22%)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+    /* wall/floor junction line */
+    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, h * 0.62); ctx.lineTo(w, h * 0.62); ctx.stroke();
+  }
+  function drawCaption(ctx, w, h, text) {
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.fillRect(0, h - 26, w, 26);
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 12px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(text, w / 2, h - 13);
+  }
+  function drawDoor(ctx, w, h) {
+    ctx.fillStyle = "hsl(28, 30%, 26%)";
+    ctx.fillRect(w * 0.4, h * 0.14, w * 0.2, h * 0.48);
+    ctx.strokeStyle = "rgba(0,0,0,0.4)"; ctx.lineWidth = 3;
+    ctx.strokeRect(w * 0.4, h * 0.14, w * 0.2, h * 0.48);
+    ctx.fillStyle = "#c9b458";
+    ctx.beginPath(); ctx.arc(w * 0.57, h * 0.4, 4, 0, Math.PI * 2); ctx.fill();
+  }
+  function drawWindow(ctx, w, h) {
+    ctx.fillStyle = "hsl(200, 45%, 60%)";
+    ctx.fillRect(w * 0.32, h * 0.16, w * 0.36, h * 0.28);
+    ctx.strokeStyle = "#ddd"; ctx.lineWidth = 4;
+    ctx.strokeRect(w * 0.32, h * 0.16, w * 0.36, h * 0.28);
+    ctx.beginPath();
+    ctx.moveTo(w * 0.5, h * 0.16); ctx.lineTo(w * 0.5, h * 0.44);
+    ctx.moveTo(w * 0.32, h * 0.3); ctx.lineTo(w * 0.68, h * 0.3);
+    ctx.stroke();
+  }
+  function drawShelf(ctx, w, h) {
+    ctx.fillStyle = "hsl(25, 28%, 30%)";
+    ctx.fillRect(w * 0.15, h * 0.46, w * 0.7, h * 0.035);   /* shelf board */
+    ctx.fillRect(w * 0.18, h * 0.49, w * 0.03, h * 0.13);   /* legs */
+    ctx.fillRect(w * 0.79, h * 0.49, w * 0.03, h * 0.13);
+  }
+  function drawOrangeBag(ctx, w, h) {
+    var bx = w * 0.42, by = h * 0.30, bw = w * 0.18, bh = h * 0.16;
+    /* handles */
+    ctx.strokeStyle = "#e8590c"; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(bx + bw * 0.3, by, bw * 0.13, Math.PI, 0); ctx.stroke();
+    ctx.beginPath(); ctx.arc(bx + bw * 0.7, by, bw * 0.13, Math.PI, 0); ctx.stroke();
+    /* body */
+    ctx.fillStyle = "#f76707";
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(bx + bw, by);
+    ctx.lineTo(bx + bw * 1.06, by + bh);
+    ctx.lineTo(bx - bw * 0.06, by + bh);
+    ctx.closePath();
+    ctx.fill();
+    /* flap shading */
+    ctx.fillStyle = "#e8590c";
+    ctx.fillRect(bx - bw * 0.02, by, bw * 1.04, bh * 0.22);
+  }
+  function drawPlant(ctx, w, h) {
+    ctx.fillStyle = "hsl(15, 35%, 35%)";
+    ctx.fillRect(w * 0.72, h * 0.5, w * 0.1, h * 0.12);
+    ctx.fillStyle = "hsl(120, 35%, 35%)";
+    ctx.beginPath(); ctx.arc(w * 0.77, h * 0.44, w * 0.09, 0, Math.PI * 2); ctx.fill();
+  }
+  function makeSweepMock(direction, withObject) {
+    var w = 480, h = 360;
+    var canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    var ctx = canvas.getContext("2d");
+    var hues = { front: 210, right: 160, back: 260, left: 40 };
+    drawRoomBase(ctx, w, h, hues[direction]);
+    if (direction === "front") drawDoor(ctx, w, h);
+    if (direction === "back") drawWindow(ctx, w, h);
+    if (direction === "right") drawPlant(ctx, w, h);
+    if (direction === "left") {
+      drawShelf(ctx, w, h);
+      if (withObject) drawOrangeBag(ctx, w, h);
+    }
+    drawCaption(ctx, w, h, "MOCK 360° VIEW — " + direction.toUpperCase());
+    return canvas.toDataURL("image/jpeg", 0.7);
+  }
+
+  /* =============================== SLOTS UI =============================== */
+  var slotEls = {};
+  function buildSlots() {
+    slotGrid.innerHTML = "";
+    DIRECTIONS.forEach(function (dir) {
+      var slot = document.createElement("div");
+      slot.className = "slot";
+      var dirLabel = document.createElement("div");
+      dirLabel.className = "dir"; dirLabel.textContent = dir;
+      var ph = document.createElement("div");
+      ph.className = "ph"; ph.textContent = "empty";
+      var img = document.createElement("img");
+      img.style.display = "none"; img.alt = dir + " photo";
+      var fileInput = document.createElement("input");
+      fileInput.type = "file"; fileInput.accept = "image/*"; fileInput.className = "hiddenFile";
+      var upBtn = document.createElement("button");
+      upBtn.className = "btn ghost small"; upBtn.textContent = "📁";
+      upBtn.addEventListener("click", function () { fileInput.value = ""; fileInput.click(); });
+      fileInput.addEventListener("change", function () {
+        var f = fileInput.files && fileInput.files[0];
+        if (!f) return;
+        var im = new Image();
+        var url = URL.createObjectURL(f);
+        im.onload = function () {
+          try { setPhoto(dir, frameToDataUrl(im, im.naturalWidth, im.naturalHeight)); }
+          catch (e) { showToast("Could not read photo: " + e.message); }
+          finally { URL.revokeObjectURL(url); }
+        };
+        im.onerror = function () { URL.revokeObjectURL(url); showToast("Could not load the photo."); };
+        im.src = url;
+      });
+      slot.appendChild(dirLabel); slot.appendChild(ph); slot.appendChild(img); slot.appendChild(upBtn); slot.appendChild(fileInput);
+      slotGrid.appendChild(slot);
+      slotEls[dir] = { ph: ph, img: img };
+    });
+  }
+  function setPhoto(dir, dataUrl) {
+    state.photos[dir] = dataUrl;
+    slotEls[dir].img.src = dataUrl;
+    slotEls[dir].img.style.display = "block";
+    slotEls[dir].ph.style.display = "none";
+    refreshSearchEnabled();
+  }
+  function clearPhotos() {
+    DIRECTIONS.forEach(function (dir) {
+      state.photos[dir] = null;
+      slotEls[dir].img.style.display = "none";
+      slotEls[dir].ph.style.display = "flex";
+    });
+    state.sweepIdx = 0;
+    state.mockScenario = null;
+    sweepInstruction.textContent = TURN_PROMPTS.front;
+    refreshSearchEnabled();
+  }
+  function photosComplete() {
+    return DIRECTIONS.every(function (d) { return !!state.photos[d]; });
+  }
+  function refreshSearchEnabled() {
+    searchNowBtn.disabled = !photosComplete();
+  }
+
+  /* =============================== CLAUDE CALLS (via proxy) =============================== */
+  var SWEEP_SYSTEM = [
+    "You are helping a blind person locate an object indoors. You receive four photos taken from one standing position: FRONT, RIGHT, BACK, LEFT (each 90 degrees apart, relative to the user's forward-facing direction).",
+    "",
+    "Respond ONLY with valid JSON, no markdown fences, exactly:",
+    '{"found":boolean,"direction":"front|right|back|left" or null,"location_detail":"string","confidence":"high|medium|low"}',
+    "",
+    "RULES:",
+    "- \"found\" is true only if the requested object is clearly visible in one of the four photos.",
+    "- \"direction\" is the photo the object appears in, null if not found.",
+    "- \"location_detail\" is one short sentence describing where in that view the object is (e.g. on a shelf at waist height, on the floor near the door). Empty-ish description if not found.",
+    "- If the photos are too dark or blurry to judge, set confidence to \"low\" and found to false.",
+    "- Never guess. If unsure, found is false."
+  ].join("\n");
+
+  function guideSystem() {
+    return [
+      "You are guiding a blind person indoors toward a specific object they are trying to reach. Photos come from a phone camera on their cap, facing forward.",
+      "",
+      "Respond ONLY with valid JSON, no markdown fences, exactly:",
+      '{"instruction":"string","hazard":"string or null","reached":boolean,"confidence":"high|medium|low"}',
+      "",
+      "RULES:",
+      "- One physical action per instruction, phrased in steps and body turns (e.g. \"turn slightly right, take 3 small steps\"). Never meters, never compass directions.",
+      "- If a hazard is visible in the live photo, the instruction MUST address the hazard first.",
+      "- If the live photo is too dark or blurry, or you cannot orient it, set confidence to \"low\" and make the instruction a request to stop, hold still, and recapture. NEVER guess a direction at low confidence.",
+      "- Set \"reached\" to true only when the object is directly in front of the user within arm's reach; then the instruction should say how to reach for it (e.g. reach forward at waist height).",
+      "- Keep instruction under 20 words."
+    ].join("\n");
+  }
+
+  function splitDataUrl(dataUrl) {
+    var m = /^data:([^;,]+);base64,(.*)$/.exec(dataUrl || "");
+    if (m) return { mediaType: m[1], data: m[2] };
+    return null;
+  }
+  function imageBlock(dataUrl) {
+    var p = splitDataUrl(dataUrl);
+    return { type: "image", source: { type: "base64", media_type: p.mediaType, data: p.data } };
+  }
+
+  function callProxy(systemText, contentBlocks) {
+    var body = {
+      max_tokens: 500,
+      system: systemText,
+      messages: [{ role: "user", content: contentBlocks }]
+    };
+    var controller = ("AbortController" in window) ? new AbortController() : null;
+    var timeoutId = controller ? setTimeout(function () { controller.abort(); }, 60000) : null;
+    return fetch("/.netlify/functions/claude-proxy", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller ? controller.signal : undefined
+    }).then(function (res) {
+      if (timeoutId) clearTimeout(timeoutId);
+      return res.text().then(function (txt) {
+        if (!res.ok) {
+          var msg = "API error " + res.status;
+          try { var j = JSON.parse(txt); if (j.error && j.error.message) msg += ": " + j.error.message; } catch (e) { /* ignore */ }
+          throw new Error(msg);
+        }
+        var data = JSON.parse(txt);
+        var raw = "";
+        if (data.content && data.content.length) {
+          data.content.forEach(function (b) { if (b.type === "text") raw += b.text; });
+        }
+        return raw;
+      });
+    }).catch(function (e) {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (e && e.name === "AbortError") throw new Error("Request timed out.");
+      throw e;
+    });
+  }
+
+  function parseJsonLoose(raw) {
+    if (typeof raw !== "string") return null;
+    var a = raw.indexOf("{"), b = raw.lastIndexOf("}");
+    if (a === -1 || b === -1 || b <= a) return null;
+    try {
+      var obj = JSON.parse(raw.slice(a, b + 1));
+      return (obj && typeof obj === "object") ? obj : null;
+    } catch (e) { return null; }
+  }
+
+  /* =============================== SWEEP FLOW =============================== */
+  function goToScreen(name) {
+    [setupScreen, sweepScreen, guideScreen].forEach(function (s) { s.classList.remove("active"); });
+    if (name === "setup") setupScreen.classList.add("active");
+    if (name === "sweep") sweepScreen.classList.add("active");
+    if (name === "guide") guideScreen.classList.add("active");
+    state.phase = name;
+  }
+
+  function setSweepBusy(busy, statusMsg) {
+    state.busy = busy;
+    sweepTap.disabled = busy;
+    searchNowBtn.disabled = busy || !photosComplete();
+    sweepTap.classList.toggle("thinking", busy);
+    if (statusMsg) sweepStatus.textContent = statusMsg;
+  }
+
+  function onSweepTap() {
+    if (state.busy) return;
+    ensureAudio();
+    try { if (navigator.vibrate) navigator.vibrate(40); } catch (e) { /* ignore */ }
+
+    if (photosComplete()) { runSearch(); return; }
+
+    var dir = DIRECTIONS[state.sweepIdx];
+    var frame;
+    if (state.practiceMode) {
+      /* practice: fabricate the capture so the flow works with no camera */
+      frame = makeSweepMock(dir, true);
+      if (state.mockScenario === null) state.mockScenario = "present";
+    } else {
+      frame = captureFrame();
+      if (!frame) {
+        speak("Camera unavailable. Ask your helper to upload photos from the panel below.");
+        showToast("No camera — use the helper panel (📁 per direction, or a mock set).", "info");
+        return;
+      }
+    }
+    setPhoto(dir, frame);
+    state.sweepIdx++;
+
+    if (state.sweepIdx >= DIRECTIONS.length) {
+      sweepStatus.textContent = "All 4 captured";
+      sweepInstruction.textContent = "Turn right to face forward again. Tap to search.";
+      speak("All four photos taken. Turn right to face forward again, then tap to search for the " + state.object + ".");
+    } else {
+      var nextDir = DIRECTIONS[state.sweepIdx];
+      sweepStatus.textContent = dir + " captured (" + state.sweepIdx + " of 4)";
+      sweepInstruction.textContent = TURN_PROMPTS[nextDir];
+      speak(TURN_PROMPTS[nextDir]);
+    }
+  }
+
+  function runSearch() {
+    if (!photosComplete()) { showToast("Need all 4 photos first."); return; }
+    setSweepBusy(true, "Searching…");
+    sweepInstruction.textContent = "Looking for: " + state.object;
+    startTicking();
+
+    var finish = function (resp, source) {
+      stopTicking();
+      logExchange({ phase: "sweep", source: source, object: state.object, response: resp });
+      if (!resp || typeof resp.found !== "boolean") {
+        speak("Please tap again.");
+        sweepInstruction.textContent = "Could not understand the response. Tap to retry the search.";
+        setSweepBusy(false, "360° sweep");
+        return;
+      }
+      if (resp.found && DIRECTIONS.indexOf(resp.direction) !== -1 && resp.confidence !== "low") {
+        state.found = resp;
+        state.reachedDone = false;
+        state.practiceGuideIdx = 0;
+        state.prevInstruction = "None yet — this is the first guidance request.";
+        var msg = "Found. The " + state.object + " is to your " + directionWord(resp.direction) + ". " +
+                  (resp.location_detail || "") + " Tap anywhere for step by step guidance.";
+        goToScreen("guide");
+        guideTarget.textContent = "Target: " + state.object + " — seen " + directionWord(resp.direction);
+        guideModeBadge.style.display = state.practiceMode ? "block" : "none";
+        guideModeBadge.textContent = "PRACTICE MODE — no API calls";
+        guideStatus.textContent = "Tap for next step";
+        guideInstruction.textContent = msg;
+        guideHazard.style.display = "none";
+        setSweepBusy(false, "360° sweep");
+        speak(msg);
+      } else {
+        playNotFoundTone();
+        var nf = "I could not see a " + state.object + " from here. Move to a different spot and sweep again.";
+        clearPhotos();
+        sweepInstruction.textContent = nf;   /* after clearPhotos so the reset prompt doesn't overwrite it */
+        speak(nf);
+        setSweepBusy(false, "360° sweep");
+        sweepStatus.textContent = "Not found — sweep again";
+      }
+    };
+
+    if (state.practiceMode) {
+      setTimeout(function () {
+        finish(state.mockScenario === "absent" ? PRACTICE_SWEEP_ABSENT : PRACTICE_SWEEP_FOUND, "practice");
+      }, 1000);
+      return;
+    }
+
+    var blocks = [
+      { type: "text", text: "The user is searching for: \"" + state.object + "\".\nFour photos from one standing position follow." }
+    ];
+    DIRECTIONS.forEach(function (dir) {
+      blocks.push({ type: "text", text: "View facing " + dir.toUpperCase() + ":" });
+      blocks.push(imageBlock(state.photos[dir]));
+    });
+    blocks.push({ type: "text", text: "Is the \"" + state.object + "\" visible in any of these four views? Answer with the required JSON only." });
+
+    callProxy(SWEEP_SYSTEM, blocks)
+      .then(function (raw) { finish(parseJsonLoose(raw), "live"); })
+      .catch(function (e) {
+        stopTicking();
+        logExchange({ phase: "sweep", error: e.message });
+        showToast(e.message);
+        sweepInstruction.textContent = "Something went wrong. Tap to retry the search.";
+        speak("Please tap again.");
+        setSweepBusy(false, "360° sweep");
+      });
+  }
+  function directionWord(dir) {
+    return dir === "front" ? "front" : dir === "back" ? "back — turn around" : dir; /* left/right read naturally */
+  }
+
+  sweepTap.addEventListener("click", onSweepTap);
+  searchNowBtn.addEventListener("click", function () { if (!state.busy) runSearch(); });
+  mockPresentBtn.addEventListener("click", function () {
+    DIRECTIONS.forEach(function (dir) { setPhoto(dir, makeSweepMock(dir, true)); });
+    state.sweepIdx = DIRECTIONS.length;
+    state.mockScenario = "present";
+    sweepStatus.textContent = "Mock set loaded";
+    sweepInstruction.textContent = "Tap to search for the " + state.object + ".";
+    showToast("Mock 360° set loaded — orange bag drawn in the LEFT view.", "success");
+  });
+  mockAbsentBtn.addEventListener("click", function () {
+    DIRECTIONS.forEach(function (dir) { setPhoto(dir, makeSweepMock(dir, false)); });
+    state.sweepIdx = DIRECTIONS.length;
+    state.mockScenario = "absent";
+    sweepStatus.textContent = "Mock set loaded (no object)";
+    sweepInstruction.textContent = "Tap to search — should come back not-found.";
+    showToast("Mock set with NO object loaded — demos the not-found path.", "success");
+  });
+  clearSlotsBtn.addEventListener("click", function () {
+    clearPhotos();
+    sweepStatus.textContent = "360° sweep";
+    speak("Photos cleared. Face forward, then tap.");
+  });
+  backToSetupBtn.addEventListener("click", function () {
+    stopCamera(); stopTicking();
+    try { window.speechSynthesis.cancel(); } catch (e) { /* ignore */ }
+    goToScreen("setup");
+  });
+
+  /* =============================== GUIDE FLOW =============================== */
+  function setGuideBusy(busy) {
+    state.busy = busy;
+    guideTap.disabled = busy;
+    guideTap.classList.toggle("thinking", busy);
+    guideStatus.textContent = busy ? "Thinking…" : "Tap for next step";
+  }
+
+  function handleGuideResponse(resp, source) {
+    logExchange({ phase: "guide", source: source, response: resp });
+    if (!resp || typeof resp.instruction !== "string") {
+      speak("Please tap again.");
+      guideInstruction.textContent = "Please tap again.";
+      return;
+    }
+    var conf = (resp.confidence === "low" || resp.confidence === "medium" || resp.confidence === "high") ? resp.confidence : "low";
+    guideHazard.style.display = resp.hazard ? "block" : "none";
+    guideHazard.textContent = resp.hazard ? "⚠ " + resp.hazard : "";
+    guideInstruction.textContent = resp.instruction;
+    state.prevInstruction = resp.instruction;
+
+    if (resp.reached === true && conf !== "low") {
+      state.reachedDone = true;
+      guideStatus.textContent = "Reached!";
+      playSuccessTone();
+      try { if (navigator.vibrate) navigator.vibrate([250, 120, 250, 120, 500]); } catch (e) { /* ignore */ }
+      setTimeout(function () {
+        speak("You have reached the " + state.object + ". " + resp.instruction);
+      }, 700);
+    } else {
+      speak(resp.instruction);
+    }
+  }
+
+  function onGuideTap() {
+    if (state.busy) return;
+    ensureAudio();
+    try { if (navigator.vibrate) navigator.vibrate(40); } catch (e) { /* ignore */ }
+
+    if (state.reachedDone) {
+      speak("You have reached the " + state.object + ".");
+      return;
+    }
+
+    setGuideBusy(true);
+    startTicking();
+
+    if (state.practiceMode) {
+      setTimeout(function () {
+        try {
+          var idx = Math.min(state.practiceGuideIdx, PRACTICE_GUIDE.length - 1);
+          state.practiceGuideIdx++;
+          handleGuideResponse(PRACTICE_GUIDE[idx], "practice");
+        } catch (e) {
+          showToast("Practice error: " + e.message);
+          speak("Please tap again.");
+        } finally {
+          stopTicking();
+          setGuideBusyAfter();
+        }
+      }, 900);
+      return;
+    }
+
+    var live = captureFrame();
+    if (!live) {
+      stopTicking();
+      setGuideBusy(false);
+      speak("Camera unavailable. Please check camera permission.");
+      showToast("No camera frame available.");
+      return;
+    }
+
+    var blocks = [
+      { type: "text", text: "LIVE PHOTO — just captured from the user's cap camera, facing forward:" },
+      imageBlock(live),
+      { type: "text", text: "REFERENCE — the sweep photo in which the target was originally seen (direction: " + state.found.direction + "):" },
+      imageBlock(state.photos[state.found.direction]),
+      { type: "text", text:
+          "TARGET OBJECT: " + state.object + "\n" +
+          "WHERE IT WAS SEEN: to the user's " + state.found.direction + " from the sweep position. " + (state.found.location_detail || "") + "\n" +
+          "PREVIOUS INSTRUCTION GIVEN: " + state.prevInstruction + "\n" +
+          "Give the next single guidance step as the required JSON only." }
+    ];
+
+    callProxy(guideSystem(), blocks)
+      .then(function (raw) { handleGuideResponse(parseJsonLoose(raw), "live"); })
+      .catch(function (e) {
+        logExchange({ phase: "guide", error: e.message });
+        showToast(e.message);
+        guideInstruction.textContent = "Something went wrong. Please tap again.";
+        speak("Please tap again.");
+      })
+      .then(function () {
+        stopTicking();
+        setGuideBusyAfter();
+      });
+  }
+  function setGuideBusyAfter() {
+    state.busy = false;
+    guideTap.disabled = false;
+    guideTap.classList.remove("thinking");
+    if (!state.reachedDone) guideStatus.textContent = "Tap for next step";
+  }
+  guideTap.addEventListener("click", onGuideTap);
+
+  newSearchLink.addEventListener("click", function (ev) {
+    ev.stopPropagation();
+    state.found = null;
+    state.reachedDone = false;
+    clearPhotos();
+    goToScreen("sweep");
+    sweepStatus.textContent = "360° sweep";
+    speak("New search. Face forward, then tap.");
+  });
+
+  /* =============================== SETUP / START =============================== */
+  document.querySelectorAll(".chip").forEach(function (chip) {
+    chip.addEventListener("click", function () { objectInput.value = chip.getAttribute("data-obj"); });
+  });
+  startBtn.addEventListener("click", function () {
+    var obj = objectInput.value.trim();
+    if (!obj) { showToast("Type what you are looking for."); return; }
+    state.object = obj;
+    state.practiceMode = practiceToggle.checked;
+    state.found = null;
+    state.reachedDone = false;
+    state.sessionLog = [];
+    ensureAudio();
+    goToScreen("sweep");
+    clearPhotos();
+    sweepStatus.textContent = "360° sweep";
+    var announce = "Searching for " + obj + ". We will take four photos around you. Face forward, then tap anywhere.";
+    if (state.practiceMode) {
+      speak(announce);
+    } else {
+      startCamera().then(function () { speak(announce); });
+    }
+  });
+
+  /* =============================== DEBUG =============================== */
+  guideDebugLink.addEventListener("click", function (ev) {
+    ev.stopPropagation();
+    debugLog.textContent = state.sessionLog.length ? JSON.stringify(state.sessionLog, null, 2) : "(no exchanges yet)";
+    debugPanel.classList.add("open");
+  });
+  debugCloseBtn.addEventListener("click", function () { debugPanel.classList.remove("open"); });
+
+  /* =============================== SAFETY NETS =============================== */
+  window.addEventListener("error", function (ev) {
+    stopTicking();
+    state.busy = false;
+    sweepTap.disabled = false; sweepTap.classList.remove("thinking");
+    guideTap.disabled = false; guideTap.classList.remove("thinking");
+    showToast("Error: " + (ev.message || "unknown"));
+  });
+  window.addEventListener("unhandledrejection", function (ev) {
+    stopTicking();
+    state.busy = false;
+    sweepTap.disabled = false; sweepTap.classList.remove("thinking");
+    guideTap.disabled = false; guideTap.classList.remove("thinking");
+    var msg = (ev.reason && ev.reason.message) ? ev.reason.message : "unknown";
+    showToast("Error: " + msg);
+  });
+
+  buildSlots();
+})();
+</script>
+</body>
+</html>
